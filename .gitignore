@@ -1,0 +1,30 @@
+# Unreal Engine: generated / local-only folders
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+.vscode/
+.idea/
+*.VC.db
+*.opensdf
+*.opendb
+*.sdf
+*.suo
+*.xcodeproj
+*.xcworkspace
+
+# Generated solution files (regenerate from MyCharacters.uproject)
+*.sln
+*.slnx
+
+# Claude / working folders
+.claude/
+claude/
+Claude outputs/
+_to_delete/
+Backup/
+
+# OS junk
+.DS_Store
+Thumbs.db

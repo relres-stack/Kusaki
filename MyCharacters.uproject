@@ -1,0 +1,49 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.8",
+	"Category": "",
+	"Description": "",
+	"Modules": [
+		{
+			"Name": "MyCharacters",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "ModelingToolsEditorMode",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "GameplayStateTree",
+			"Enabled": true
+		},
+		{
+			"Name": "RemoteControl",
+			"Enabled": true
+		},
+		{
+			"Name": "MetaHumanCharacter",
+			"Enabled": true
+		},
+		{
+			"Name": "MetaHumanCoreTech",
+			"Enabled": true
+		},
+		{
+			"Name": "MetaHumanCharacterUAF",
+			"Enabled": true
+		},
+		{
+			"Name": "CableComponent",
+			"Enabled": true
+		}
+	]
+}
