@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "SiblingCharacter.h"
+#include "ControlHint.h"
 #include "FlashlightComponent.h"
 #include "InventoryComponent.h"
 #include "Components/SpotLightComponent.h"
@@ -28,6 +29,15 @@ void ASiblingCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	// project's other actions already use.
 	PlayerInputComponent->BindAction("Flashlight", IE_Pressed, this, &ASiblingCharacter::OnFlashlightPressed);
 	PlayerInputComponent->BindKey(EKeys::T, IE_Pressed, this, &ASiblingCharacter::OnFlashlightPressed);
+}
+
+void ASiblingCharacter::GetControlHints(TArray<FControlHint>& OutHints) const
+{
+	// Keep in sync with SetupPlayerInputComponent() above.
+	OutHints.Add(FControlHint::Section(INVTEXT("БРАТ / СЕСТРА")));
+	OutHints.Emplace(INVTEXT("T"), INVTEXT("фонарик вкл / выкл"));
+
+	Super::GetControlHints(OutHints);
 }
 
 void ASiblingCharacter::OnFlashlightPressed()

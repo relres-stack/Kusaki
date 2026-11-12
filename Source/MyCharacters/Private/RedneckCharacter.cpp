@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "RedneckCharacter.h"
+#include "ControlHint.h"
 #include "MoonshineComponent.h"
 #include "HunterFocusComponent.h"
 #include "FlashlightComponent.h"
@@ -58,6 +59,21 @@ void ARedneckCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	// header comment.
 	PlayerInputComponent->BindAction("UseMoonshine", IE_Pressed, this, &ARedneckCharacter::OnUseMoonshinePressed);
 	PlayerInputComponent->BindKey(EKeys::Q, IE_Pressed, this, &ARedneckCharacter::OnUseMoonshinePressed);
+}
+
+void ARedneckCharacter::GetControlHints(TArray<FControlHint>& OutHints) const
+{
+	// Keep in sync with SetupPlayerInputComponent() above and TryHijackAttackPress()/Interact() below.
+	OutHints.Add(FControlHint::Section(INVTEXT("РЕДНЕК")));
+	OutHints.Emplace(INVTEXT("Q"), INVTEXT("выпить самогон (баф: неуязвимость + бег)"));
+	OutHints.Emplace(INVTEXT("ПКМ + ЛКМ (под самогоном)"), INVTEXT("таран"));
+	OutHints.Emplace(INVTEXT("F (держа ПКМ)"), INVTEXT("охотничий глазомер: шаги до цели"));
+	OutHints.Emplace(INVTEXT("T"), INVTEXT("фонарик вкл / выкл"));
+	OutHints.Emplace(INVTEXT("E (у пьяницы)"), INVTEXT("угостить самогоном и взять на плечо"));
+	OutHints.Emplace(INVTEXT("ПКМ + ЛКМ (с пьяницей)"), INVTEXT("бросить пьяницу-приманку в точку прицела"));
+	OutHints.Emplace(INVTEXT("E (у бинокля)"), INVTEXT("посмотреть в бинокль (один раз)"));
+
+	Super::GetControlHints(OutHints);
 }
 
 bool ARedneckCharacter::TryHijackAttackPress()

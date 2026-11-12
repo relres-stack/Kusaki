@@ -114,6 +114,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Rider|Holy Explosion")
 	void TryHolyExplosion();
 
+	// Rider's own keys for the on-screen controls list — see ABaseCharacter::GetControlHints().
+	virtual void GetControlHints(TArray<FControlHint>& OutHints) const override;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;

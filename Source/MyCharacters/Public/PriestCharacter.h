@@ -218,6 +218,11 @@ protected:
 
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
+public:
+	// Priest's own keys for the on-screen controls list — see ABaseCharacter::GetControlHints().
+	virtual void GetControlHints(TArray<FControlHint>& OutHints) const override;
+
+protected:
 	// Crouches while holding a lit Candle in either hand, stands back up once none remain — called from
 	// every point EquippedRightHand/EquippedLeftHand actually change (PickUp()/ThrowItem()/Interact()'s
 	// drop branches, see ABaseCharacter::OnHeldItemsChanged()'s own comment). Requires

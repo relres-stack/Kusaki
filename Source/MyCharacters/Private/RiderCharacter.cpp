@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "RiderCharacter.h"
+#include "ControlHint.h"
 #include "MountRiderComponent.h"
 #include "BaseMonster.h"
 #include "HolyItem.h"
@@ -81,6 +82,23 @@ void ARiderCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 	// "Ink Vision" — same direct BindKey() reasoning as Mount/Refill Censer/Holy Explosion above. V is
 	// free on Rider (F/R/X already taken).
 	PlayerInputComponent->BindKey(EKeys::V, IE_Pressed, this, &ARiderCharacter::OnInkVisionTogglePressed);
+}
+
+void ARiderCharacter::GetControlHints(TArray<FControlHint>& OutHints) const
+{
+	// Keep in sync with SetupPlayerInputComponent() above and OnMountOrHookPressed() below.
+	OutHints.Add(FControlHint::Section(INVTEXT("НАЕЗДНИЦА")));
+	OutHints.Emplace(INVTEXT("F (смотреть на монстра)"), INVTEXT("сесть верхом"));
+	OutHints.Emplace(INVTEXT("Пробел (верхом)"), INVTEXT("спешиться"));
+	OutHints.Emplace(INVTEXT("F (верхом, на крючок)"), INVTEXT("зацепиться за крючок"));
+	OutHints.Emplace(INVTEXT("F (на крючке)"), INVTEXT("спрыгнуть"));
+	OutHints.Emplace(INVTEXT("ПКМ + ЛКМ (верхом)"), INVTEXT("взмах кадилом (тратит 1 топливо)"));
+	OutHints.Emplace(INVTEXT("C"), INVTEXT("зажечь / потушить кадило (и одновременно присед)"));
+	OutHints.Emplace(INVTEXT("R"), INVTEXT("долить масло в кадило из запаса"));
+	OutHints.Emplace(INVTEXT("X (пешком)"), INVTEXT("святой взрыв (нужно от 5 топлива)"));
+	OutHints.Emplace(INVTEXT("V"), INVTEXT("чернильное зрение вкл / выкл"));
+
+	Super::GetControlHints(OutHints);
 }
 
 bool ARiderCharacter::IsMounted() const

@@ -2,6 +2,7 @@
 
 #include "PriestCharacter.h"
 #include "BaseMonster.h"
+#include "ControlHint.h"
 #include "CandleDamageType.h"
 #include "HolyItem.h"
 #include "InventoryComponent.h"
@@ -75,6 +76,19 @@ void APriestCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	// "Scatter Prayer" — same direct BindKey() reasoning as ARiderCharacter::TryHolyExplosion()'s own X
 	// binding. X is free on this class.
 	PlayerInputComponent->BindKey(EKeys::X, IE_Pressed, this, &APriestCharacter::TryScatterPrayer);
+}
+
+void APriestCharacter::GetControlHints(TArray<FControlHint>& OutHints) const
+{
+	// Keep in sync with SetupPlayerInputComponent() above.
+	OutHints.Add(FControlHint::Section(INVTEXT("ПРИСТ")));
+	OutHints.Emplace(INVTEXT("Q"), INVTEXT("свечи по кругу: зажечь правую, затем левую, затем убрать в карман"));
+	OutHints.Emplace(INVTEXT("ПКМ + ЛКМ"), INVTEXT("бросить свечу (свеча теряется)"));
+	OutHints.Emplace(INVTEXT("E (у свечи)"), INVTEXT("подобрать свечу в карман"));
+	OutHints.Emplace(INVTEXT("V"), INVTEXT("воспалённое зрение вкл / выкл (сам закрывает глаза)"));
+	OutHints.Emplace(INVTEXT("X"), INVTEXT("молитва: отбросить монстров рядом (перезарядка 20 с)"));
+
+	Super::GetControlHints(OutHints);
 }
 
 void APriestCharacter::Tick(float DeltaTime)

@@ -18,6 +18,8 @@ class UHidingComponent;
 class UInventoryComponent;
 class UProbeComponent;
 class UPlayerHUDWidget;
+class UControlsHintWidget;
+struct FControlHint;
 class UInputMappingContext;
 class UInputAction;
 class UPostProcessComponent;
@@ -605,6 +607,16 @@ public:
 	// BlueprintImplementableEvents for how that skinning hook works.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HUD")
 	TSubclassOf<UPlayerHUDWidget> PlayerHUDWidgetClass;
+
+	// On-screen controls list (top-right corner, H hides/shows it) — see UControlsHintWidget. Created in
+	// InitializeLocalPlayerUI() next to PlayerHUDWidgetInstance.
+	UPROPERTY()
+	TObjectPtr<UControlsHintWidget> ControlsHintWidgetInstance;
+
+	// Fills the on-screen controls list (UControlsHintWidget). This base version adds the keys every hero
+	// shares; each hero class overrides it, adds its own section first, then calls Super. Keep in sync with
+	// SetupPlayerInputComponent() of the same class — a new/changed key binding there needs its line here.
+	virtual void GetControlHints(TArray<FControlHint>& OutHints) const;
 
 	// Crosshair dot color while the aim trace hits neither a mountable monster nor a target/item — plain
 	// world geometry, sky/no hit, or anything else not covered by the two colors below.

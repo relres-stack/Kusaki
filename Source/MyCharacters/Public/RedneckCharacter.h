@@ -108,6 +108,9 @@ public:
 	UPROPERTY()
 	TObjectPtr<ADrunkNPC> CarriedNPC;
 
+	// Redneck's own keys for the on-screen controls list — see ABaseCharacter::GetControlHints().
+	virtual void GetControlHints(TArray<FControlHint>& OutHints) const override;
+
 protected:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 

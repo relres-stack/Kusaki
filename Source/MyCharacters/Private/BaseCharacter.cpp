@@ -10,6 +10,7 @@
 #include "InventoryComponent.h"
 #include "ProbeComponent.h"
 #include "PlayerHUDWidget.h"
+#include "ControlsHintWidget.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "EnhancedInputComponent.h"
@@ -301,6 +302,36 @@ void ABaseCharacter::InitializeLocalPlayerUI()
 		PlayerHUDWidgetInstance->SetOwnerCharacter(this);
 		PlayerHUDWidgetInstance->AddToViewport(0);
 	}
+
+	// On-screen controls list (top-right, H hides/shows) — see UControlsHintWidget. Same "set owner before
+	// AddToViewport()" order as the HUD above; NativeConstruct() reads GetControlHints() once from it.
+	ControlsHintWidgetInstance = CreateWidget<UControlsHintWidget>(OwningPC, UControlsHintWidget::StaticClass());
+	if (IsValid(ControlsHintWidgetInstance))
+	{
+		ControlsHintWidgetInstance->SetOwnerCharacter(this);
+		ControlsHintWidgetInstance->AddToViewport(2);
+		ControlsHintWidgetInstance->SetVisibility(ESlateVisibility::HitTestInvisible);
+	}
+}
+
+void ABaseCharacter::GetControlHints(TArray<FControlHint>& OutHints) const
+{
+	// Keys every hero shares — bound in SetupPlayerInputComponent() below. Movement (WASD) and jump
+	// (Space) are deliberately left out; only their special uses during panic are listed.
+	OutHints.Add(FControlHint::Section(INVTEXT("ОБЩЕЕ (все герои)")));
+	OutHints.Emplace(INVTEXT("ПКМ (держать)"), INVTEXT("прицелиться"));
+	OutHints.Emplace(INVTEXT("Left Shift"), INVTEXT("закрыть / открыть глаза"));
+	OutHints.Emplace(INVTEXT("Left Alt"), INVTEXT("бег вкл / выкл"));
+	OutHints.Emplace(INVTEXT("C"), INVTEXT("присесть / встать"));
+	OutHints.Emplace(INVTEXT("G (в приседе)"), INVTEXT("прощупать путь впереди"));
+	OutHints.Emplace(INVTEXT("E"), INVTEXT("подобрать / положить предмет"));
+	OutHints.Emplace(INVTEXT("E (у укрытия)"), INVTEXT("спрятаться / выйти"));
+	OutHints.Emplace(INVTEXT("E (в капкане)"), INVTEXT("жать быстро, чтобы вырваться"));
+	OutHints.Emplace(INVTEXT("1–4 / колесо"), INVTEXT("выбрать быстрый слот"));
+	OutHints.Emplace(INVTEXT("Пробел (в панике)"), INVTEXT("вдох носом в такт кольцу"));
+	OutHints.Emplace(INVTEXT("WASD (в панике)"), INVTEXT("не жать — шкала паники растёт"));
+	OutHints.Emplace(INVTEXT("W (после паники)"), INVTEXT("встать"));
+	OutHints.Emplace(INVTEXT("9"), INVTEXT("отладка: метка в точку прицела"));
 }
 
 void ABaseCharacter::ApplyDefaultInputMappingContext()
