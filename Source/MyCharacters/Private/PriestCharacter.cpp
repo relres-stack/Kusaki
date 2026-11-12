@@ -95,6 +95,9 @@ void APriestCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	bCandleInRightHand = IsValid(EquippedRightHand) && EquippedRightHand->ItemType == EHolyItemType::Candle;
+	bCandleInLeftHand = IsValid(EquippedLeftHand) && EquippedLeftHand->ItemType == EHolyItemType::Candle;
+
 	// Raised-arm values for the AnimBP (see the header): smoothed 0..1 alpha, pose * alpha, plus a gentle sway.
 	VisionArmRaiseAlpha = FMath::FInterpTo(VisionArmRaiseAlpha, bVisionArmRaised ? 1.0f : 0.0f, DeltaTime, VisionArmRaiseSpeed);
 	if (VisionArmRaiseAlpha < 0.001f)
@@ -453,6 +456,11 @@ void APriestCharacter::CycleCandleHands()
 
 void APriestCharacter::OnHeldItemsChanged()
 {
+	if (!bAutoCrouchWithLitCandle)
+	{
+		return;
+	}
+
 	// "Active" candle per this task's own wording: currently held (either hand) AND still lit — a thrown/
 	// dropped/extinguished one no longer counts, matching the same bIsLit gate
 	// UInventoryComponent::RefreshLightSourceSlot() already uses for "is this actually equipped light".

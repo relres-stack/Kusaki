@@ -219,6 +219,19 @@ protected:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 public:
+	// Auto-crouch while holding a lit Candle (see OnHeldItemsChanged()). OFF by default since 12.11.2026: the old
+	// crouch was a placeholder for "carrying a candle"; the carry pose below replaces it. Tick the box to bring it back.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Priest|Candle Pose")
+	bool bAutoCrouchWithLitCandle = false;
+
+	// True while a Candle (lit or not) is held in that hand. Refreshed every Tick(); the AnimBP reads these to
+	// blend the arm pose (e.g. AS_CandleCarry_Pose) onto that arm only.
+	UPROPERTY(BlueprintReadOnly, Category = "Priest|Candle Pose")
+	bool bCandleInRightHand = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Priest|Candle Pose")
+	bool bCandleInLeftHand = false;
+
 	// Priest's own keys for the on-screen controls list — see ABaseCharacter::GetControlHints().
 	virtual void GetControlHints(TArray<FControlHint>& OutHints) const override;
 

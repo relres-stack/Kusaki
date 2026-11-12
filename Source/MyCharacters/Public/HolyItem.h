@@ -215,6 +215,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Holy Item|Equip Offset")
 	FRotator EquipRotationOffsetLeftHand = FRotator(90.0f, 0.0f, 0.0f);
 
+	// Optional socket on THIS item's own static mesh (add it in the Static Mesh Editor: Window -> Socket Manager) that
+	// marks where the hand holds the item. If the mesh has a socket with this name, PickUp() lines that socket up with
+	// the hand's grip socket (instead of the mesh's pivot) — the socket's position AND rotation set which side of the
+	// item sits in the palm and which way is "up". EquipLocationOffset/EquipRotationOffset (and the Left Hand pair)
+	// then act as small extra adjustments ON TOP of that alignment. If the mesh has no such socket, nothing changes:
+	// the item is attached by its pivot exactly as before. Lets any candle model be swapped in: just add a "Grip"
+	// socket to the new model.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Holy Item|Equip Offset")
+	FName GripSocketName = TEXT("Grip");
+
 	// Censer-only: bone/socket on the holder's skeleton the item (and ChainVisualComponent, see below) is
 	// moved to while EXTINGUISHED — hangs at the belt/shoulder like a put-away censer instead of staying in
 	// the hand. PLACEHOLDER — verify against the actual skeleton (SKM_Manny_Simple/SKM_Quinn_Simple) via

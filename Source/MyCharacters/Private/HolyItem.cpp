@@ -15,6 +15,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshSocket.h"
 #include "Engine/EngineTypes.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UObjectGlobals.h"
@@ -1028,15 +1029,32 @@ void AHolyItem::PickUp(USkeletalMeshComponent* AttachToMesh, FName SocketName, b
 		// on why hand_l needs genuinely separate values rather than a mirrored formula applied to the
 		// right-hand ones (this project's actual skeleton doesn't mirror hand_r/hand_l as a clean single-
 		// axis reflection).
-		if (bInvertForward)
+		const FVector HandLocationOffset = bInvertForward ? EquipLocationOffsetLeftHand : EquipLocationOffset;
+		const FRotator HandRotationOffset = bInvertForward ? EquipRotationOffsetLeftHand : EquipRotationOffset;
+
+		// Optional grip socket on this item's own mesh (see GripSocketName): when present, line IT up with the hand
+		// socket instead of the mesh pivot. The item's root (ItemMesh) goes to Desired * Grip^-1, i.e. the grip point
+		// lands exactly on the hand socket (+ the Equip offsets as fine-tuning) and the item's up follows the grip
+		// socket's own orientation. The mesh scale is applied to the socket position by hand because the
+		// socket stores unscaled mesh-space values; relative scale itself is left untouched below.
+		const UStaticMeshSocket* GripSocket = nullptr;
+		if (GripSocketName != NAME_None && IsValid(ItemMesh) && IsValid(ItemMesh->GetStaticMesh()))
 		{
-			SetActorRelativeLocation(EquipLocationOffsetLeftHand);
-			SetActorRelativeRotation(EquipRotationOffsetLeftHand);
+			GripSocket = ItemMesh->GetStaticMesh()->FindSocket(GripSocketName);
+		}
+
+		if (GripSocket)
+		{
+			const FTransform GripScaled(FQuat(GripSocket->RelativeRotation), GripSocket->RelativeLocation * ItemMesh->GetRelativeScale3D());
+			const FTransform Desired(HandRotationOffset, HandLocationOffset);
+			const FTransform RootRelative = GripScaled.Inverse() * Desired;
+			SetActorRelativeLocation(RootRelative.GetLocation());
+			SetActorRelativeRotation(RootRelative.GetRotation());
 		}
 		else
 		{
-			SetActorRelativeLocation(EquipLocationOffset);
-			SetActorRelativeRotation(EquipRotationOffset);
+			SetActorRelativeLocation(HandLocationOffset);
+			SetActorRelativeRotation(HandRotationOffset);
 		}
 	}
 	else
