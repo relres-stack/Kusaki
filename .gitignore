@@ -19,7 +19,8 @@ DerivedDataCache/
 *.slnx
 
 # Claude / working folders
-.claude/
+.claude/*
+!.claude/settings.local.json
 claude/
 Claude outputs/
 _to_delete/
