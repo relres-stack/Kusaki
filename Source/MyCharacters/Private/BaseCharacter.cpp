@@ -493,7 +493,8 @@ void ABaseCharacter::Tick(float DeltaTime)
 		// holding RMB, and on Redneck specifically ARedneckCharacter::TryHijackAttackPress() gates Rage
 		// Dash on nothing but !bIsAiming — reading bIsAiming here as forced-false is enough to block both,
 		// since neither place has its own separate panic check.
-		if (bIsPanicking)
+		// bAimSuppressed (SetAimSuppressed(), e.g. the opening scene) uses the same override.
+		if (bIsPanicking || bAimSuppressed)
 		{
 			bIsAiming = false;
 		}
@@ -717,7 +718,8 @@ void ABaseCharacter::Tick(float DeltaTime)
 		CrosshairWidgetInstance->bShowDot = bIsAiming;
 		CrosshairWidgetInstance->PromptText = FText::FromString(PromptString);
 
-		const bool bShouldBeVisible = bIsAiming || !PromptString.IsEmpty();
+		// bAimSuppressed hides the prompt too (a scripted scene must not show "Press E" over the shot).
+		const bool bShouldBeVisible = !bAimSuppressed && (bIsAiming || !PromptString.IsEmpty());
 		CrosshairWidgetInstance->SetVisibility(bShouldBeVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
 }

@@ -131,6 +131,16 @@ public:
 
 	bool IsImmuneToMonsterAttacks() const { return bImmuneToMonsterAttacks; }
 
+	// Generic "no aiming right now" switch for outside callers (today: AIntroSceneDirector, the opening
+	// scene). While true, Tick() forces bIsAiming false exactly like the panic override (so holding RMB
+	// neither zooms the camera nor shows the dot, and everything that reads bIsAiming sees "not aiming"),
+	// and the crosshair widget — dot AND interaction prompt — stays collapsed. Same generic-flag convention
+	// as SetEyesLockedClosed()/SetImmuneToMonsterAttacks(): the caller turns it on and off.
+	UFUNCTION(BlueprintCallable, Category = "Holy Items|Throw")
+	void SetAimSuppressed(bool bSuppressed) { bAimSuppressed = bSuppressed; }
+
+	bool IsAimSuppressed() const { return bAimSuppressed; }
+
 	// Called from CloseEyes()/OpenEyes() — empty base. CloseEyes()/OpenEyes() themselves never touch
 	// Hunter's Focus's step markers at all (only a camera fade), so this hook exists purely so
 	// ARedneckCharacter can forward the transition to its HunterFocusComponent, switching any currently-
@@ -960,6 +970,10 @@ protected:
 	// of TakeDamage() and EnterPanicState().
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Health")
 	bool bImmuneToMonsterAttacks = false;
+
+	// See SetAimSuppressed()/IsAimSuppressed() above — checked in Tick() next to the panic override.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Holy Items|Throw")
+	bool bAimSuppressed = false;
 
 	// Bound to the "Interact" action (E by default, see DefaultInput.ini). Item pickup/drop ONLY: picks
 	// up HighlightedItem into a free hand, or if nothing is highlighted and a hand is occupied, drops
