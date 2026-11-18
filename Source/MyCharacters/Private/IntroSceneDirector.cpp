@@ -5,6 +5,7 @@
 #include "BaseCharacter.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -100,13 +101,17 @@ void AIntroSceneDirector::StartScene()
 
 	BuildRoute();
 
-	// Camera path: starts far in front of the final standing point and high above it, ends (they meet) right in
-	// front of the hero's face. See UpdateApproachCamera().
+	// Camera path: starts far in front of the final standing point and high above it, ends in front of that point.
+	// See UpdateApproachCamera(). Both camera moves are tied to walk distance: the orbit takes the last
+	// OrbitDuration seconds of the walk, the fly-in ends ApproachOrbitOverlap seconds after the orbit has started.
 	const FVector Final = Waypoints[Last];
 	ApproachEnd = Final + HeadingDir * FrontCameraDistance + FVector(0, 0, FrontCameraHeight);
 	const FVector ApproachDir = HeadingDir.RotateAngleAxis(-ApproachYawOffset, FVector::UpVector);
 	ApproachStart = Final + ApproachDir * ApproachStartDistance + FVector(0, 0, ApproachStartHeight);
-	OrbitPivot = Final + FVector(0, 0, HalfHeight);
+	const float Total = RouteDist.Last();
+	OrbitStartRemaining = FMath::Clamp(WalkSpeed * OrbitDuration, 1.0f, Total * 0.8f);
+	ApproachDistance = FMath::Clamp(Total - OrbitStartRemaining + WalkSpeed * ApproachOrbitOverlap, Total * 0.2f, Total);
+	OrbitRaw = 0.0f;
 	WalkProgress = 0.0f;
 	CameraProgress = 0.0f;
 	ClearanceLift = 0.0f;
@@ -137,7 +142,73 @@ void AIntroSceneDirector::StartScene()
 	UE_LOG(LogTemp, Warning, TEXT("IntroScene: started — %d waypoints, hero placed at %s, camera from %s to %s"),
 		Waypoints.Num(), *Waypoints[0].ToString(), *ApproachStart.ToString(), *ApproachEnd.ToString());
 
+	if (bFadeIn && PC->PlayerCameraManager)
+	{
+		// Black from the very first frame; the HUD (Slate/UMG) is not covered by the camera fade and stays visible.
+		PC->PlayerCameraManager->SetManualCameraFade(1.0f, FLinearColor::Black, false);
+		Phase = EIntroPhase::WarmingUp;
+		PhaseTime = 0.0f;
+		WarmupFrameTimes.Reset();
+		SetActorTickEnabled(true);
+		return;
+	}
 	BeginWalking();
+}
+
+void AIntroSceneDirector::TickWarmup(float DeltaSeconds)
+{
+	// Steady = the last WarmupStableFrames frames are within WarmupMaxFrameRatio of each other (not "fast"),
+	// so a slow-but-even PC starts as quickly as a fast one. WarmupMaxTime is the hard limit.
+	WarmupFrameTimes.Add(DeltaSeconds);
+	const int32 Window = FMath::Max(WarmupStableFrames, 2);
+	while (WarmupFrameTimes.Num() > Window)
+	{
+		WarmupFrameTimes.RemoveAt(0);
+	}
+
+	bool bSteady = false;
+	float MinDt = 0.0f, MaxDt = 0.0f;
+	if (WarmupFrameTimes.Num() == Window)
+	{
+		MinDt = FMath::Min(WarmupFrameTimes);
+		MaxDt = FMath::Max(WarmupFrameTimes);
+		bSteady = MinDt > KINDA_SMALL_NUMBER && MaxDt <= MinDt * WarmupMaxFrameRatio;
+	}
+	const bool bTimedOut = PhaseTime >= WarmupMaxTime;
+	if (!bSteady && !bTimedOut)
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("IntroScene: warm-up done after %.2fs (%s, last frames %.0f-%.0f ms), fading in over %.1fs"),
+		PhaseTime, bSteady ? TEXT("frames steady") : TEXT("time limit reached"), MinDt * 1000.0f, MaxDt * 1000.0f, FadeInDuration);
+	FadeElapsed = 0.0f;   // TickFadeIn() drives it from the next frame
+	BeginWalking();       // he starts walking as the picture appears
+}
+
+void AIntroSceneDirector::TickFadeIn(float DeltaSeconds)
+{
+	APlayerCameraManager* CamManager = PC->PlayerCameraManager;
+	if (!CamManager)
+	{
+		FadeElapsed = -1.0f;
+		return;
+	}
+
+	// Driven by hand instead of StartCameraFade(): the engine blends the fade colour in LINEAR colour (before the
+	// display gamma), so a linear fade amount makes the picture jump to ~1/3 brightness within the first tenth of
+	// the fade. Here the visible brightness follows an eased curve: Visible = SmoothStep(t)^2.2 in linear terms,
+	// which the display gamma turns back into an even rise. A long frame advances the fade by at most 50 ms.
+	FadeElapsed += FMath::Min(DeltaSeconds, 0.05f);
+	const float T = FMath::Clamp(FadeElapsed / FMath::Max(FadeInDuration, 0.01f), 0.0f, 1.0f);
+	const float VisibleLinear = FMath::Pow(FMath::SmoothStep(0.0f, 1.0f, T), 2.2f);
+	if (T >= 1.0f)
+	{
+		CamManager->StopCameraFade();   // overlay off entirely (the engine applies it only while fading is enabled)
+		FadeElapsed = -1.0f;
+		return;
+	}
+	CamManager->SetManualCameraFade(1.0f - VisibleLinear, FLinearColor::Black, false);
 }
 
 void AIntroSceneDirector::BuildRoute()
@@ -158,7 +229,13 @@ void AIntroSceneDirector::BuildRoute()
 			{
 				for (int32 k = 1; k < Path->PathPoints.Num() - 1; ++k)
 				{
-					Route.Add(Path->PathPoints[k]);
+					// Corner points right next to a waypoint are NavMesh projection noise, not a real detour: skip them.
+					const FVector& C = Path->PathPoints[k];
+					if (FVector::Dist2D(C, Route.Last()) > 30.0f && FVector::Dist2D(C, Waypoints[i]) > 30.0f)
+					{
+						Route.Add(C);
+						UE_LOG(LogTemp, Warning, TEXT("IntroScene: NavMesh corner between waypoints %d and %d at %s"), i - 1, i, *C.ToString());
+					}
 				}
 				++NavSegments;
 			}
@@ -181,20 +258,47 @@ void AIntroSceneDirector::BuildRoute()
 	}
 }
 
-float AIntroSceneDirector::ComputeWalkProgress() const
+FVector AIntroSceneDirector::RoutePointAt(float Distance) const
 {
-	const float Total = RouteDist.Num() > 0 ? RouteDist.Last() : 0.0f;
-	if (Total <= KINDA_SMALL_NUMBER || !Route.IsValidIndex(RouteIndex))
+	if (Distance <= 0.0f)
 	{
-		return 1.0f;
+		return Route[0];
 	}
-	const float Left = FVector::Dist2D(Player->GetActorLocation(), Route[RouteIndex]);
-	return FMath::Clamp((RouteDist[RouteIndex] - Left) / Total, 0.0f, 1.0f);
+	for (int32 k = 0; k < Route.Num() - 1; ++k)
+	{
+		if (Distance <= RouteDist[k + 1])
+		{
+			const float SegLen = RouteDist[k + 1] - RouteDist[k];
+			return FMath::Lerp(Route[k], Route[k + 1], SegLen > KINDA_SMALL_NUMBER ? (Distance - RouteDist[k]) / SegLen : 1.0f);
+		}
+	}
+	return Route.Last();
+}
+
+void AIntroSceneDirector::UpdateRouteProjection()
+{
+	// Project the hero onto the route (2D), moving forward only: a segment is left once he is past its end.
+	const FVector Hero = Player->GetActorLocation();
+	float T = 0.0f;
+	while (true)
+	{
+		const FVector A = Route[RouteSegment];
+		const FVector AB(Route[RouteSegment + 1].X - A.X, Route[RouteSegment + 1].Y - A.Y, 0.0f);
+		const float Len2 = AB.SizeSquared();
+		T = Len2 > 1.0f ? FVector::DotProduct(FVector(Hero.X - A.X, Hero.Y - A.Y, 0.0f), AB) / Len2 : 1.0f;
+		if (T < 1.0f || RouteSegment >= Route.Num() - 2)
+		{
+			break;
+		}
+		++RouteSegment;
+	}
+	const float SegLen = RouteDist[RouteSegment + 1] - RouteDist[RouteSegment];
+	RouteAlong = FMath::Max(RouteAlong, RouteDist[RouteSegment] + FMath::Clamp(T, 0.0f, 1.0f) * SegLen);
 }
 
 float AIntroSceneDirector::RemainingWalkDistance() const
 {
-	return bHeroArrived ? 0.0f : (1.0f - WalkProgress) * (RouteDist.Num() > 0 ? RouteDist.Last() : 0.0f);
+	return bHeroArrived ? 0.0f : FMath::Max((RouteDist.Num() > 0 ? RouteDist.Last() : 0.0f) - RouteAlong, 0.0f);
 }
 
 void AIntroSceneDirector::UpdateCameraLook(float DeltaSeconds, bool bSnap)
@@ -258,7 +362,8 @@ void AIntroSceneDirector::BeginWalking()
 	PhaseTime = 0.0f;
 	WalkTime = 0.0f;
 	bHeroArrived = false;
-	RouteIndex = 1;
+	RouteSegment = 0;
+	RouteAlong = 0.0f;
 	SetActorTickEnabled(true);
 }
 
@@ -272,38 +377,36 @@ void AIntroSceneDirector::Tick(float DeltaSeconds)
 	}
 	PhaseTime += DeltaSeconds;
 
+	if (FadeElapsed >= 0.0f)
+	{
+		TickFadeIn(DeltaSeconds);
+	}
+
 	// The walk runs on its own: the orbit may already have started while the hero takes his last steps.
-	if (!bHeroArrived)
+	const bool bWalkPhase = (Phase == EIntroPhase::Walking || Phase == EIntroPhase::Orbiting);
+	if (bWalkPhase && !bHeroArrived)
 	{
 		WalkTime += DeltaSeconds;
 		TickWalking(DeltaSeconds);
 	}
 
+	// Long frames show up as camera/hero jerks: log them, so a stutter can be told apart from a code problem.
+	if (bWalkPhase && DeltaSeconds > 0.06f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("IntroScene: slow frame %.0f ms (%s, t=%.2fs)"),
+			DeltaSeconds * 1000.0f, *UEnum::GetValueAsString(Phase), PhaseTime);
+	}
+
 	switch (Phase)
 	{
+	case EIntroPhase::WarmingUp:
+		UpdateCameraLook(DeltaSeconds, true);
+		TickWarmup(DeltaSeconds);
+		break;
 	case EIntroPhase::Walking:
 		UpdateApproachCamera(DeltaSeconds, false);
 		UpdateCameraLook(DeltaSeconds, false);
-		if (bHeroArrived)
-		{
-			if (OrbitLeadTime <= 0.0f && HoldDuration > 0.0f)
-			{
-				BeginHolding();
-			}
-			else
-			{
-				BeginOrbit();
-			}
-		}
-		else if (OrbitLeadTime > 0.0f && RemainingWalkDistance() <= WalkSpeed * OrbitLeadTime)
-		{
-			BeginOrbit();
-		}
-		break;
-	case EIntroPhase::Holding:
-		UpdateApproachCamera(DeltaSeconds, false);
-		UpdateCameraLook(DeltaSeconds, false);
-		if (PhaseTime >= HoldDuration)
+		if (bHeroArrived || RemainingWalkDistance() <= OrbitStartRemaining)
 		{
 			BeginOrbit();
 		}
@@ -320,11 +423,11 @@ void AIntroSceneDirector::Tick(float DeltaSeconds)
 	{
 		FString Extra;
 		FColor Color = FColor::Cyan;
-		if (!bHeroArrived && Route.IsValidIndex(RouteIndex))
+		if (!bHeroArrived && RouteDist.Num() > 0)
 		{
 			const float Speed = Player->GetVelocity().Size2D();
-			Extra = FString::Printf(TEXT("  point %d/%d, %.0f cm to go, speed %.0f, walk %.0f%% camera %.0f%%, timeout in %.0fs"),
-				RouteIndex, Route.Num() - 1, FVector::Dist2D(Player->GetActorLocation(), Route[RouteIndex]),
+			Extra = FString::Printf(TEXT("  segment %d/%d, %.0f cm to go, speed %.0f, walk %.0f%% camera %.0f%%, timeout in %.0fs"),
+				RouteSegment + 1, Route.Num() - 1, RouteDist.Last() - RouteAlong,
 				Speed, WalkProgress * 100.0f, CameraProgress * 100.0f, FMath::Max(WalkTimeout - WalkTime, 0.0f));
 			if (WalkTime > 0.5f && Speed < 10.0f)
 			{
@@ -333,11 +436,19 @@ void AIntroSceneDirector::Tick(float DeltaSeconds)
 		}
 		if (Phase == EIntroPhase::Orbiting)
 		{
-			Extra += FString::Printf(TEXT("  orbit %.0f%%%s"), FMath::Clamp(PhaseTime / FMath::Max(OrbitDuration, 0.1f), 0.0f, 1.0f) * 100.0f,
-				bHeroArrived ? TEXT("") : TEXT(" (hero still walking)"));
+			Extra += FString::Printf(TEXT("  orbit %.0f%%%s"), OrbitRaw * 100.0f,
+				bHeroArrived ? TEXT(" (hero stopped)") : TEXT(""));
 		}
-		ShowDebug(500, 0.0f, Color, FString::Printf(TEXT("IntroScene: %s  t=%.1fs%s"),
-			*UEnum::GetValueAsString(Phase), PhaseTime, *Extra));
+		if (Phase == EIntroPhase::WarmingUp)
+		{
+			Extra = FString::Printf(TEXT("  black screen, waiting for %d steady frames (max %.1fs)"), WarmupStableFrames, WarmupMaxTime);
+		}
+		if (DeltaSeconds > 0.06f)
+		{
+			Color = FColor::Orange;   // slow frame right now
+		}
+		ShowDebug(500, 0.0f, Color, FString::Printf(TEXT("IntroScene: %s  t=%.1fs  frame %.0f ms%s"),
+			*UEnum::GetValueAsString(Phase), PhaseTime, DeltaSeconds * 1000.0f, *Extra));
 	}
 }
 
@@ -362,31 +473,33 @@ void AIntroSceneDirector::TickWalking(float DeltaSeconds)
 		const float HalfHeight = Player->GetCapsuleComponent() ? Player->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 90.0f;
 		Player->SetActorLocation(Waypoints.Last() + FVector(0, 0, HalfHeight + 5.0f), false, nullptr, ETeleportType::TeleportPhysics);
 		UE_LOG(LogTemp, Warning, TEXT("IntroScene: walk timed out, hero placed on the last waypoint"));
-		ShowDebug(501, 6.0f, FColor::Yellow, FString::Printf(TEXT("IntroScene: walk TIMED OUT at point %d/%d - hero teleported to the last point"),
-			RouteIndex, Route.Num() - 1));
+		ShowDebug(501, 6.0f, FColor::Yellow, FString::Printf(TEXT("IntroScene: walk TIMED OUT on segment %d/%d - hero teleported to the last point"),
+			RouteSegment + 1, Route.Num() - 1));
 		OnHeroArrived();
 		return;
 	}
 
-	FVector ToTarget = Route[RouteIndex] - Player->GetActorLocation();
-	ToTarget.Z = 0.0f;
-	const bool bIsLast = (RouteIndex == Route.Num() - 1);
-	// Corner points from the NavMesh sit right next to obstacles: pass them close, do not cut the corner.
-	const float ArriveRadius = bIsLast ? 40.0f : 50.0f;
-
-	if (ToTarget.Size() <= ArriveRadius)
+	const FVector HeroLoc = Player->GetActorLocation();
+	if (FVector::Dist2D(HeroLoc, Route.Last()) <= 40.0f)
 	{
-		if (bIsLast)
-		{
-			OnHeroArrived();
-			return;
-		}
-		++RouteIndex;
+		OnHeroArrived();
 		return;
 	}
 
-	WalkProgress = FMath::Max(WalkProgress, ComputeWalkProgress());
+	UpdateRouteProjection();
+	WalkProgress = FMath::Max(WalkProgress, ApproachDistance > KINDA_SMALL_NUMBER ? FMath::Min(RouteAlong / ApproachDistance, 1.0f) : 1.0f);
 
+	// Aim at a point RouteLookAhead further along the route ("carrot"): smooth through NavMesh corners, never back.
+	// Near the end the carrot sits on the last point, so he walks straight onto the start spot.
+	FVector ToTarget = RoutePointAt(RouteAlong + RouteLookAhead) - HeroLoc;
+	ToTarget.Z = 0.0f;
+	if (ToTarget.SizeSquared() < 1.0f)
+	{
+		ToTarget = Route.Last() - HeroLoc;
+		ToTarget.Z = 0.0f;
+	}
+
+	// Input EVERY frame (a frame without it lets the anim graph drop into its stop state).
 	// bForce = true: move input is ignored on the controller, but this is the scene driving the pawn, not the player.
 	Player->AddMovementInput(ToTarget.GetSafeNormal(), 1.0f, true);
 }
@@ -395,14 +508,7 @@ void AIntroSceneDirector::OnHeroArrived()
 {
 	bHeroArrived = true;
 	WalkProgress = 1.0f;   // the camera finishes its approach (glides the last bit)
-	UE_LOG(LogTemp, Warning, TEXT("IntroScene: hero arrived after %.1fs"), WalkTime);
-}
-
-void AIntroSceneDirector::BeginHolding()
-{
-	Phase = EIntroPhase::Holding;
-	PhaseTime = 0.0f;
-	UE_LOG(LogTemp, Warning, TEXT("IntroScene: holding for %.1fs"), HoldDuration);
+	UE_LOG(LogTemp, Warning, TEXT("IntroScene: hero arrived after %.1fs (orbit at %.0f%%)"), WalkTime, OrbitRaw * 100.0f);
 }
 
 FVector AIntroSceneDirector::ComputeOrbitEndPos() const
@@ -431,28 +537,42 @@ void AIntroSceneDirector::BeginOrbit()
 	PC->SetControlRotation(GameplayRotation);
 
 	// Sweep around the hero's RIGHT side (decreasing angle): front -> right -> behind. Decided once, from where
-	// the fly-in ends to where the player's camera will be.
-	const float FromAngle = IntroYawOf(ApproachEnd - OrbitPivot);
-	const float ToAngle = IntroYawOf(ComputeOrbitEndPos() - OrbitPivot);
+	// the camera is now to where the player's camera will be.
+	const FVector Pivot = Player->GetActorLocation();
+	const float FromAngle = IntroYawOf(SceneCamera->GetActorLocation() - Pivot);
+	const float ToAngle = IntroYawOf(ComputeOrbitEndPos() - Pivot);
 	bOrbitFullTurn = FMath::Fmod(FromAngle - ToAngle + 720.0f, 360.0f) < 30.0f;   // camera already behind: still make a visible turn
 
-	UE_LOG(LogTemp, Warning, TEXT("IntroScene: orbit starts (%s), %.1fs"),
-		bHeroArrived ? TEXT("hero has arrived") : TEXT("hero still walking"), OrbitDuration);
+	UE_LOG(LogTemp, Warning, TEXT("IntroScene: orbit starts, %.0f cm of the walk left (%s)"),
+		RemainingWalkDistance(), bHeroArrived ? TEXT("hero already stopped") : TEXT("ends when he stops"));
 }
 
 void AIntroSceneDirector::TickOrbit(float DeltaSeconds)
 {
-	const float Raw = FMath::Clamp(PhaseTime / FMath::Max(OrbitDuration, 0.1f), 0.0f, 1.0f);
-	const float Alpha = FMath::SmoothStep(0.0f, 1.0f, Raw);
+	// Orbit progress follows the walk: 0 when OrbitStartRemaining of the route is left, 1 when he stops.
+	// Smoothed so it never jumps; after he has stopped (normally only a hair is left; after a timeout teleport
+	// the whole sweep) it finishes at a steady pace, at most ~2 s for the full turn.
+	if (!bHeroArrived)
+	{
+		const float Target = FMath::Clamp(1.0f - RemainingWalkDistance() / FMath::Max(OrbitStartRemaining, 1.0f), 0.0f, 1.0f);
+		OrbitRaw = FMath::FInterpTo(OrbitRaw, Target, DeltaSeconds, 10.0f);
+	}
+	else
+	{
+		OrbitRaw = FMath::FInterpConstantTo(OrbitRaw, 1.0f, DeltaSeconds, 0.5f);
+	}
+	const float Alpha = FMath::SmoothStep(0.0f, 1.0f, OrbitRaw);
 
 	// Until he has stopped he may still turn a little: keep the target behind his back.
 	GameplayRotation.Yaw = Player->GetActorRotation().Yaw;
 	PC->SetControlRotation(GameplayRotation);
 
-	// The fly-in keeps going underneath (it is still closing in if the hero has not arrived yet) and is turned
-	// around the pivot by the orbit: the camera spirals in instead of stopping and then starting to turn.
-	const FVector Off = ComputeApproachPos(DeltaSeconds, false) - OrbitPivot;
-	const FVector EndOff = ComputeOrbitEndPos() - OrbitPivot;
+	// Polar coordinates around the hero himself (he is still walking). The fly-in keeps going underneath and is
+	// turned around him by the orbit: the camera spirals in instead of stopping and then starting to turn, and
+	// ends exactly at the player's camera position relative to him.
+	const FVector Pivot = Player->GetActorLocation();
+	const FVector Off = ComputeApproachPos(DeltaSeconds, false) - Pivot;
+	const FVector EndOff = ComputeOrbitEndPos() - Pivot;
 
 	const float FromAngle = IntroYawOf(Off);
 	float Sweep = FMath::Fmod(FromAngle - IntroYawOf(EndOff) + 720.0f, 360.0f);
@@ -463,11 +583,11 @@ void AIntroSceneDirector::TickOrbit(float DeltaSeconds)
 	const float Rad = FMath::DegreesToRadians(FromAngle - Sweep * Alpha);
 	const float Radius = FMath::Lerp(FVector(Off.X, Off.Y, 0.0f).Size(), FVector(EndOff.X, EndOff.Y, 0.0f).Size(), Alpha);
 	const float Z = FMath::Lerp(Off.Z, EndOff.Z, Alpha);
-	const FVector Pos = OrbitPivot + FVector(Radius * FMath::Cos(Rad), Radius * FMath::Sin(Rad), Z);
+	const FVector Pos = Pivot + FVector(Radius * FMath::Cos(Rad), Radius * FMath::Sin(Rad), Z);
 
 	// Look at the hero's face, and over the last part of the sweep turn towards the direction the player's
 	// camera will look in, so the hand-over blend has almost nothing left to correct.
-	const FVector FaceTarget = Player->GetActorLocation() + FVector(0, 0, LookAtHeight);
+	const FVector FaceTarget = Pivot + FVector(0, 0, LookAtHeight);
 	const FVector GameTarget = Pos + GameplayRotation.Vector() * 1000.0f;
 	const float TurnAlpha = FMath::SmoothStep(0.0f, 1.0f, (Alpha - 0.6f) / 0.4f);
 	const FVector LookTarget = FMath::Lerp(FaceTarget, GameTarget, TurnAlpha);
@@ -475,8 +595,8 @@ void AIntroSceneDirector::TickOrbit(float DeltaSeconds)
 
 	SceneCamera->SetActorLocationAndRotation(Pos, CameraLookRotation);
 
-	// Hand over only once the hero is really standing (normally long before the orbit ends).
-	if (Raw >= 1.0f && bHeroArrived)
+	// Hand over the moment he is standing and the camera is behind him (normally the same moment).
+	if (bHeroArrived && OrbitRaw >= 0.995f)
 	{
 		BeginHandover();
 	}
@@ -505,6 +625,11 @@ void AIntroSceneDirector::FinishScene()
 	PC->SetIgnoreMoveInput(false);
 	PC->SetIgnoreLookInput(false);
 	Player->SetAimSuppressed(false);
+	if (PC->PlayerCameraManager)
+	{
+		PC->PlayerCameraManager->StopCameraFade();   // safety: never leave the screen dark (the fade-in is long over by now)
+	}
+	FadeElapsed = -1.0f;
 
 	Phase = EIntroPhase::Done;
 	SetActorTickEnabled(false);
