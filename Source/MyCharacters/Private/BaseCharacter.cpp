@@ -230,6 +230,36 @@ void ABaseCharacter::PossessedBy(AController* NewController)
 	InitializeLocalPlayerUI();
 }
 
+void ABaseCharacter::UnPossessed()
+{
+	// Before Super: the widgets belong to the controller that is letting go, clean them up while it is still ours.
+	ReleaseLocalPlayerUI();
+	Super::UnPossessed();
+}
+
+void ABaseCharacter::ReleaseLocalPlayerUI()
+{
+	if (IsValid(CrosshairWidgetInstance))
+	{
+		CrosshairWidgetInstance->RemoveFromParent();
+	}
+	CrosshairWidgetInstance = nullptr;
+
+	if (IsValid(PlayerHUDWidgetInstance))
+	{
+		PlayerHUDWidgetInstance->RemoveFromParent();
+	}
+	PlayerHUDWidgetInstance = nullptr;
+
+	if (IsValid(ControlsHintWidgetInstance))
+	{
+		ControlsHintWidgetInstance->RemoveFromParent();
+	}
+	ControlsHintWidgetInstance = nullptr;
+
+	bLocalPlayerUIInitialized = false;
+}
+
 void ABaseCharacter::InitializeLocalPlayerUI()
 {
 	if (bLocalPlayerUIInitialized)
@@ -549,7 +579,18 @@ void ABaseCharacter::Tick(float DeltaTime)
 	// own screen effect (Ink Vision / Inflamed Vision) suppresses the darkness so it isn't crushed.
 	if (IsValid(EyesClosedPostProcessComp))
 	{
-		const bool bShouldBeBlind = bIsEyesClosed && !bIsAiming && !bIsDarknessSuppressedByAbility;
+		// Only the hero the PLAYER controls darkens the screen: the component is unbound (affects every view),
+		// so a hero walking around under AI control in the prologue (APrologueDirector) with its eyes closed
+		// would otherwise black out the view of the hero the player is actually playing.
+		const bool bIsPlayersHero = IsValid(Cast<APlayerController>(GetController()));
+		const bool bShouldBeBlind = bIsPlayersHero && bIsEyesClosed && !bIsAiming && !bIsDarknessSuppressedByAbility;
+
+		// A hero NOT under the player must also drop out of the post-process blend entirely, not just stop being
+		// "blind": its exposure/vignette overrides stay on (set to 0 "no effect"), and unbound volumes of equal
+		// priority are applied in registration order (UWorld::InsertPostProcessVolumeEntry), so the last-spawned
+		// AI hero would overwrite the player's darkness with 0 every frame (only the blur, whose overrides are off
+		// while not blind, got through). BlendWeight 0 skips the volume; bEnabled stays true (see BeginPlay).
+		EyesClosedPostProcessComp->BlendWeight = bIsPlayersHero ? 1.0f : 0.0f;
 		FPostProcessSettings& PP = EyesClosedPostProcessComp->Settings;
 
 		PP.AutoExposureBias = bShouldBeBlind ? EyesClosedExposureBias : 0.0f;

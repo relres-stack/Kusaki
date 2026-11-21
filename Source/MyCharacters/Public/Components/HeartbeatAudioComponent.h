@@ -59,9 +59,14 @@ private:
 	TObjectPtr<UAudioComponent> CalmBreathingComp;
 	TObjectPtr<UAudioComponent> PanicHeartbeatComp;
 
-	// Edge-detection so TickComponent() only calls Play()/Stop() on an actual bIsPanicking transition,
-	// not every frame it happens to still be true/false (which would otherwise keep restarting an
-	// already-playing looping sound) — same edge-triggered reasoning as ABaseCharacter::Move()'s own
-	// PanicMovementPenalty per-direction flags.
-	bool bWasPanickingLastTick = false;
+	// What is currently playing. TickComponent() works out what SHOULD play (silent / calm / panic) and only
+	// calls Play()/Stop() when that changes, never every frame (which would keep restarting an already-playing
+	// looping sound) — same edge-triggered reasoning as ABaseCharacter::Move()'s PanicMovementPenalty flags.
+	// Silent whenever the PLAYER is not controlling this hero: the sounds are not spatialized, so in the
+	// prologue (several heroes on the level, APrologueDirector) every AI-controlled hero's heartbeat would
+	// otherwise play in the player's ears on top of the controlled hero's.
+	enum class EHeartbeatState : uint8 { Unset, Silent, Calm, Panic };
+	EHeartbeatState AppliedState = EHeartbeatState::Unset;
+
+	void ApplyState(EHeartbeatState NewState);
 };

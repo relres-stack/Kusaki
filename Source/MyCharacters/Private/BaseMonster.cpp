@@ -369,7 +369,9 @@ void ABaseMonster::Tick(float DeltaTime)
 		return;
 	}
 
-	if (bIsStunned || bIsStaggered || bIsScanning || bIsInvestigatingAlert)
+	// bIsScriptControlled: a scene drives this monster (SetScriptControlled()'s own comment) — none of the
+	// Patrol/Stalk/Chase movement below may fight the scene's own move requests.
+	if (bIsStunned || bIsStaggered || bIsScanning || bIsInvestigatingAlert || bIsScriptControlled)
 	{
 		return;
 	}
@@ -549,7 +551,9 @@ void ABaseMonster::CheckForPlayer()
 	// standalone "piling on" check below, calling TryStartPanicStrike() again immediately instead of
 	// waiting out the delay (the machine-gun-swing regression PanicStrikeRearmDelay was added to fix in the
 	// first place, reopened by this specific gap).
-	if (bIsStunned || bIsStaggered || bIsBeingRidden || bIsScanning || PendingChaseAttackTarget.IsValid()
+	// bIsScriptControlled: same "a scene drives it" reason as Tick() — no detection, no attacks. Placed after
+	// the aura backup above on purpose: the player's held light still pushes/stuns a scripted monster.
+	if (bIsStunned || bIsStaggered || bIsBeingRidden || bIsScriptControlled || bIsScanning || PendingChaseAttackTarget.IsValid()
 		|| PendingNaskokAttackTarget.IsValid() || PendingPanicStrikeTarget.IsValid()
 		|| GetWorldTimerManager().IsTimerActive(PanicStrikeRearmTimerHandle)
 		|| (IsValid(Player) && Player->bIsPanicking && this == Player->PanicEpisodeOriginator.Get()
@@ -1399,8 +1403,9 @@ void ABaseMonster::MoveToNextPatrolPoint()
 
 	// Guards the case where a call to this was already queued (e.g. Tick's WaitTimerHandle lambda)
 	// before the monster got stunned in the meantime — without this it would still issue a fresh
-	// move command while bIsStunned is true.
-	if (bIsStunned)
+	// move command while bIsStunned is true. bIsScriptControlled: same for a queued call that fires after a
+	// scene took this monster over (SetScriptControlled()).
+	if (bIsStunned || bIsScriptControlled)
 	{
 		return;
 	}
@@ -1444,8 +1449,9 @@ void ABaseMonster::MoveToRandomWanderPoint()
 	// Same bIsStunned guard as MoveToNextPatrolPoint() itself — this function is reached both THROUGH
 	// that one and directly (its own retry timer, and Tick()'s shadow-wander branch), so re-checked here
 	// too since it's also where the actual AICon->MoveToLocation() call lives, matching this class's
-	// general "check again right where the side effect happens" style.
-	if (bIsStunned)
+	// general "check again right where the side effect happens" style. bIsScriptControlled: see
+	// MoveToNextPatrolPoint().
+	if (bIsStunned || bIsScriptControlled)
 	{
 		return;
 	}
@@ -1961,6 +1967,20 @@ void ABaseMonster::OnCapsuleHit(UPrimitiveComponent* HitComp, AActor* OtherActor
 
 	ABaseCharacter* Player = Cast<ABaseCharacter>(OtherActor);
 	if (!IsValid(Player) || Player->bIsDead)
+	{
+		return;
+	}
+
+	// Only the hero the player controls counts, same as every other detection/attack path in this class
+	// (they all use GetPlayerCharacter(0)). In the prologue the other heroes walk around under AI control
+	// (APrologueDirector) and must never start an encounter just by brushing against a monster.
+	if (Player != UGameplayStatics::GetPlayerCharacter(this, 0))
+	{
+		return;
+	}
+
+	// A monster driven by a scene does not start encounters by itself either (SetScriptControlled()).
+	if (bIsScriptControlled)
 	{
 		return;
 	}
@@ -3060,6 +3080,7 @@ bool ABaseMonster::ReceiveAlert(const FVector& AlertLocation, int32 SlotIndex, i
 	if (bIsStunned) { OutReason = TEXT("Stunned"); return false; }
 	if (bIsStaggered) { OutReason = TEXT("Staggered"); return false; }
 	if (bIsBeingRidden) { OutReason = TEXT("Being ridden"); return false; }
+	if (bIsScriptControlled) { OutReason = TEXT("Script controlled"); return false; }
 	// bIsFleeingToShadow alone covers BOTH "still actively running toward cover" AND "arrived, standing
 	// safely in shadow" (see its own header comment) — only the former should actually block a pack call.
 	// A monster that's already reached safety (bIsIdleInShadow) has nothing left to flee from and should
@@ -3252,6 +3273,47 @@ void ABaseMonster::OnDismounted()
 	// Tick()'s and CheckForPlayer()'s identical branches). Otherwise, ordinary patrol/wander resumes via
 	// MoveToNextPatrolPoint(), ending back in normal Patrol/Chase-at-Night behavior as usual.
 	if (State == EMonsterState::Patrol && !bIsWaiting)
+	{
+		if (bIsFleeingToShadow && bIsIdleInShadow)
+		{
+			MoveToRandomWanderPoint();
+		}
+		else
+		{
+			MoveToNextPatrolPoint();
+		}
+	}
+}
+
+void ABaseMonster::SetScriptControlled(bool bScripted)
+{
+	if (bIsScriptControlled == bScripted)
+	{
+		return;
+	}
+	bIsScriptControlled = bScripted;
+
+	AAIController* AICon = Cast<AAIController>(GetController());
+	if (bScripted)
+	{
+		// Drop whatever its own AI was doing; the scene issues the next move itself. State is left as it was
+		// (no Chase/Stalk cleanup is skipped this way) — Tick()/CheckForPlayer() simply stop acting on it.
+		if (AICon)
+		{
+			AICon->StopMovement();
+			AICon->ClearFocus(EAIFocusPriority::Gameplay);
+		}
+		UE_LOG(LogTemp, Warning, TEXT("%s: script controlled ON"), *GetName());
+		return;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("%s: script controlled OFF, back to its own AI"), *GetName());
+	// Back to its own AI from wherever the scene left it — same resume as OnDismounted().
+	if (AICon)
+	{
+		AICon->StopMovement();
+	}
+	if (State == EMonsterState::Patrol && !bIsWaiting && !bIsStunned && !bIsBeingRidden)
 	{
 		if (bIsFleeingToShadow && bIsIdleInShadow)
 		{

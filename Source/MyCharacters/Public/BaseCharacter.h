@@ -854,6 +854,11 @@ protected:
 	// case a pawn is ever possessed before its BeginPlay() runs instead (e.g. SpawnActorDeferred).
 	void InitializeLocalPlayerUI();
 
+	// Counterpart of InitializeLocalPlayerUI(): removes the crosshair, HUD and controls-hint widgets from the
+	// viewport and clears bLocalPlayerUIInitialized. Called from UnPossessed(); safe to call when nothing was
+	// created (an AI-controlled hero never builds them).
+	void ReleaseLocalPlayerUI();
+
 	// Bound to MoveAction — standard control-rotation-relative WASD movement. Issues one
 	// AddMovementInput() call per axis with a pure direction vector (matching the Enhanced Input
 	// template convention AddMovementInput()'s own override already assumes — see its comment), so it
@@ -901,6 +906,12 @@ public:
 	// See InitializeLocalPlayerUI()'s own comment on why this (not just BeginPlay()) is needed for the
 	// HUD/crosshair/input mapping context to reliably appear for the player's initial pawn.
 	virtual void PossessedBy(AController* NewController) override;
+
+	// The player's controller lets go of this hero (prologue hero switching, APrologueDirector): takes this
+	// hero's own screen widgets off the screen and clears bLocalPlayerUIInitialized, so the hero the player
+	// switches to shows ONLY its own HUD, and this one builds a fresh HUD if the player comes back to it
+	// (the Priest is controlled twice in the prologue). See ReleaseLocalPlayerUI().
+	virtual void UnPossessed() override;
 
 	// Overridden so that while IsMounted(), every movement-input call (regardless of where in the input
 	// graph it originates — WASD calls this same virtual via Move()'s AddMovementInput() calls, so

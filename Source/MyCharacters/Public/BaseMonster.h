@@ -518,6 +518,20 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mounting")
 	bool bIsBeingRidden = false;
 
+	// Scripted role (prologue, APrologueDirector): while true, this monster's own AI stays out of the way so a
+	// scene can drive it through the public API (RequestMoveToActor/Location, PlayAttackAnimation, Stun,
+	// ApplyKnockback) — e.g. a pack pressing a hero the player does not control. Blocks the same places
+	// bIsBeingRidden/bIsStunned already block: Tick()'s Patrol/Chase/Stalk movement, CheckForPlayer()'s
+	// detection and attacks, ReceiveAlert() (it does not answer pack calls), the patrol/wander moves, and
+	// OnCapsuleHit()'s Naskok/Blind Encounter. NOT blocked on purpose: taking damage and stun (a held candle
+	// still stuns it, that is part of the scene) and the sun check (fleeing from the sun still works).
+	// Turning it off hands the monster back to its normal AI wherever it stands.
+	UFUNCTION(BlueprintCallable, Category = "AI|Script")
+	void SetScriptControlled(bool bScripted);
+
+	UFUNCTION(BlueprintPure, Category = "AI|Script")
+	bool IsScriptControlled() const { return bIsScriptControlled; }
+
 	// Whether this monster is allowed to be mounted at all — checked by
 	// UMountRiderComponent::CanMountMonster() alongside Health/bIsBeingRidden/mesh validity. Defaults to true
 	// and is NEVER written to false by anything in the Shadow AI (HandleDawnStarted(), CheckSunExposure(),
@@ -1356,6 +1370,10 @@ private:
 
 	// True while stunned by Candle holy damage; suppresses AI movement and fleeing.
 	bool bIsStunned = false;
+
+	// See SetScriptControlled() — the monster is driven by a scene, not by its own AI.
+	UPROPERTY(VisibleInstanceOnly, Category = "AI|Script")
+	bool bIsScriptControlled = false;
 
 	// True from OnCapsuleHit() until the blind encounter it started fully resolves (EndScanningState() or
 	// OnBlindEncounterResolved()/ResolveBlindEncounterKill()) — guards against re-triggering a fresh

@@ -3,6 +3,7 @@
 #include "Components/HeartbeatAudioComponent.h"
 #include "BaseCharacter.h"
 #include "Components/AudioComponent.h"
+#include "GameFramework/PlayerController.h"
 
 UHeartbeatAudioComponent::UHeartbeatAudioComponent()
 {
@@ -48,15 +49,9 @@ void UHeartbeatAudioComponent::BeginPlay()
 		PanicHeartbeatComp->SetSound(PanicHeartbeatSound);
 	}
 
-	// Starting state is always "not panicking" — start the calm loop(s) immediately if assigned.
-	if (IsValid(CalmHeartbeatComp))
-	{
-		CalmHeartbeatComp->Play();
-	}
-	if (IsValid(CalmBreathingComp))
-	{
-		CalmBreathingComp->Play();
-	}
+	// Nothing is started here: the first TickComponent() picks the right state. At BeginPlay() the player's
+	// starting hero is usually not possessed yet, so starting the calm loop here would be wrong for an
+	// AI-controlled hero (see AppliedState's own comment).
 }
 
 void UHeartbeatAudioComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -69,34 +64,40 @@ void UHeartbeatAudioComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		return;
 	}
 
-	const bool bIsPanickingNow = Character->bIsPanicking;
-	if (bIsPanickingNow == bWasPanickingLastTick)
+	EHeartbeatState Wanted = EHeartbeatState::Silent;
+	if (IsValid(Cast<APlayerController>(Character->GetController())))
 	{
-		return;
+		Wanted = Character->bIsPanicking ? EHeartbeatState::Panic : EHeartbeatState::Calm;
 	}
-	bWasPanickingLastTick = bIsPanickingNow;
+	if (Wanted != AppliedState)
+	{
+		ApplyState(Wanted);
+	}
+}
 
-	if (bIsPanickingNow)
+void UHeartbeatAudioComponent::ApplyState(EHeartbeatState NewState)
+{
+	AppliedState = NewState;
+
+	const bool bCalm = (NewState == EHeartbeatState::Calm);
+	const bool bPanic = (NewState == EHeartbeatState::Panic);
+
+	// Stop first, then start, so a calm -> panic change never has both playing for a frame.
+	if (IsValid(CalmHeartbeatComp) && !bCalm)
 	{
-		if (IsValid(CalmHeartbeatComp))
-		{
-			CalmHeartbeatComp->Stop();
-		}
-		if (IsValid(CalmBreathingComp))
-		{
-			CalmBreathingComp->Stop();
-		}
-		if (IsValid(PanicHeartbeatComp))
-		{
-			PanicHeartbeatComp->Play();
-		}
+		CalmHeartbeatComp->Stop();
 	}
-	else
+	if (IsValid(CalmBreathingComp) && !bCalm)
 	{
-		if (IsValid(PanicHeartbeatComp))
-		{
-			PanicHeartbeatComp->Stop();
-		}
+		CalmBreathingComp->Stop();
+	}
+	if (IsValid(PanicHeartbeatComp) && !bPanic)
+	{
+		PanicHeartbeatComp->Stop();
+	}
+
+	if (bCalm)
+	{
 		if (IsValid(CalmHeartbeatComp))
 		{
 			CalmHeartbeatComp->Play();
@@ -105,5 +106,9 @@ void UHeartbeatAudioComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		{
 			CalmBreathingComp->Play();
 		}
+	}
+	if (bPanic && IsValid(PanicHeartbeatComp))
+	{
+		PanicHeartbeatComp->Play();
 	}
 }
