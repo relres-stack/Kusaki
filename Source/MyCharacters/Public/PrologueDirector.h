@@ -12,6 +12,7 @@ class ABaseCharacter;
 class AIntroSceneDirector;
 class APlayerController;
 class UPrologueScenarioData;
+struct FPrologueAppearancePlacement;
 struct FPrologueHeroEntry;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPrologueHeroSwitched, FName, NewHeroId);
@@ -65,6 +66,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug", meta = (ClampMin = "100.0"))
 	float DebugSpawnSpacing = 300.0f;
 
+	// Debug: this key brings in the next hero of Scenario->Heroes that is not in the level yet, by his appearance
+	// rule (AppearHero()). For testing step 2.1 switch bDebugSpawnMissingHeroes off, otherwise nobody is missing.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug")
+	bool bDebugAppearKey = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug")
+	FKey DebugAppearHeroKey = EKeys::J;
+
+	// Debug: after AppearHero() the candidate points stay drawn this long (green = chosen, red = allowed but
+	// hidden or worse, grey = outside the distance/angle limits). 0 = not drawn.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug", meta = (ClampMin = "0.0"))
+	float DebugDrawPointsTime = 8.0f;
+
 	// Debug readout on screen (keys 600-609): who is controlled, which heroes exist.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug")
 	bool bShowDebug = true;
@@ -78,6 +92,13 @@ public:
 	// and does not move it.
 	UFUNCTION(BlueprintCallable, Category = "Prologue")
 	ABaseCharacter* SpawnHero(FName HeroId, const FTransform& Where);
+
+	// Brings hero HeroId into the prologue by his rule in Scenario->Appearances (step 2.1): spawns him under AI at
+	// the best point the player can see right now — a candidate point with the rule's tag first, otherwise a point
+	// around the player's view snapped to the navmesh. If no point is visible, the best one is used anyway (with a
+	// warning): the scenario must go on. If the hero already exists, returns him and does not move him.
+	UFUNCTION(BlueprintCallable, Category = "Prologue")
+	ABaseCharacter* AppearHero(FName HeroId);
 
 	UFUNCTION(BlueprintPure, Category = "Prologue")
 	ABaseCharacter* GetHero(FName HeroId) const;
@@ -106,6 +127,10 @@ private:
 	void DebugSpawnMissingHeroes();
 
 	const FPrologueHeroEntry* FindEntry(FName HeroId) const;
+
+	// AppearHero()'s point search. Fills OutTransform (feet on the ground, facing) and a short description of where
+	// it came from for the log. False only when not a single point could be found (no candidates, no navmesh).
+	bool FindAppearanceTransform(const FPrologueAppearancePlacement& Placement, float CapsuleHalfHeight, FTransform& OutTransform, FString& OutWhere) const;
 	FName FindHeroId(const ABaseCharacter* Hero) const;
 
 	AAIController* GetOrCreateAIController(ABaseCharacter* Hero, FName HeroId);

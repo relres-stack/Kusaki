@@ -4,12 +4,16 @@
 
 #include "AIController.h"
 #include "BaseCharacter.h"
+#include "Components/CapsuleComponent.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "IntroSceneDirector.h"
 #include "Kismet/GameplayStatics.h"
+#include "NavigationSystem.h"
+#include "PrologueAppearance.h"
 #include "PrologueScenarioData.h"
 #include "TimerManager.h"
 
@@ -183,6 +187,181 @@ ABaseCharacter* APrologueDirector::SpawnHero(FName HeroId, const FTransform& Whe
 	PutUnderAI(Hero, HeroId);
 	UE_LOG(LogTemp, Warning, TEXT("Prologue: hero '%s' spawned at %s"), *HeroId.ToString(), *Hero->GetActorLocation().ToString());
 	return Hero;
+}
+
+ABaseCharacter* APrologueDirector::AppearHero(FName HeroId)
+{
+	if (ABaseCharacter* Existing = GetHero(HeroId))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: AppearHero('%s') - already in the level, not moved"), *HeroId.ToString());
+		return Existing;
+	}
+
+	const FPrologueHeroEntry* Entry = FindEntry(HeroId);
+	if (!Entry || !Entry->HeroClass)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: AppearHero('%s') - no such hero in the Scenario (or no class set)"), *HeroId.ToString());
+		return nullptr;
+	}
+
+	FPrologueAppearancePlacement Placement;
+	if (const FPrologueHeroAppearance* Rule = Scenario->Appearances.FindByPredicate(
+		[HeroId](const FPrologueHeroAppearance& R) { return R.HeroId == HeroId; }))
+	{
+		Placement = Rule->Placement;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: AppearHero('%s') - no rule in Scenario->Appearances, using the default placement"), *HeroId.ToString());
+	}
+
+	// Points are on the ground; the hero's actor origin is the middle of his capsule.
+	float HalfHeight = 90.0f;
+	if (const ABaseCharacter* Defaults = Entry->HeroClass->GetDefaultObject<ABaseCharacter>())
+	{
+		if (const UCapsuleComponent* Capsule = Defaults->GetCapsuleComponent())
+		{
+			HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+		}
+	}
+
+	FTransform Where;
+	FString WhereText;
+	if (!FindAppearanceTransform(Placement, HalfHeight, Where, WhereText))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: AppearHero('%s') - no point found (no candidate points with tag '%s', no navmesh around the player)"),
+			*HeroId.ToString(), *Placement.CandidateTag.ToString());
+		ShowDebug(602, 6.0f, FColor::Red, FString::Printf(TEXT("Prologue: %s could not appear - no point found"), *HeroId.ToString()));
+		return nullptr;
+	}
+
+	ABaseCharacter* Hero = SpawnHero(HeroId, Where);
+	if (IsValid(Hero))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s appeared - %s"), *HeroId.ToString(), *WhereText);
+		ShowDebug(602, 6.0f, FColor::Green, FString::Printf(TEXT("Prologue: %s appeared - %s"), *HeroId.ToString(), *WhereText));
+	}
+	return Hero;
+}
+
+bool APrologueDirector::FindAppearanceTransform(const FPrologueAppearancePlacement& Placement, float CapsuleHalfHeight,
+	FTransform& OutTransform, FString& OutWhere) const
+{
+	UWorld* World = GetWorld();
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!World || !IsValid(PC))
+	{
+		return false;
+	}
+
+	// What the player sees: his camera, not his hero's actor.
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	const FVector ViewDir = ViewRotation.Vector();
+
+	// Only static level geometry hides a point (walls, rocks, terrain): heroes and monsters walking by must not
+	// change where a hero appears.
+	const FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(PrologueAppearance), false);
+	const FCollisionObjectQueryParams StaticOnly(ECC_WorldStatic);
+	auto IsVisible = [&](const FVector& Ground)
+	{
+		const FVector Target = Ground + FVector(0.0f, 0.0f, Placement.VisibilityTraceHeight);
+		return !World->LineTraceTestByObjectType(ViewLocation, Target, StaticOnly, TraceParams);
+	};
+
+	auto Describe = [&](const FVector& Ground)
+	{
+		return FString::Printf(TEXT("%.1f m, %.0f deg from the view"), FVector::Dist2D(ViewLocation, Ground) / 100.0f,
+			PrologueAppearance::ViewAngleTo(ViewLocation, ViewDir, Ground));
+	};
+
+	auto DrawPoints = [&](const TArray<FVector>& Points, int32 Chosen)
+	{
+		if (!bShowDebug || DebugDrawPointsTime <= 0.0f)
+		{
+			return;
+		}
+		for (int32 i = 0; i < Points.Num(); ++i)
+		{
+			const FColor Color = (i == Chosen) ? FColor::Green
+				: (PrologueAppearance::IsWithinLimits(ViewLocation, ViewDir, Points[i], Placement) ? FColor::Red : FColor(128, 128, 128));
+			DrawDebugSphere(World, Points[i] + FVector(0.0f, 0.0f, 50.0f), (i == Chosen) ? 60.0f : 30.0f, 8, Color, false, DebugDrawPointsTime);
+		}
+		if (Points.IsValidIndex(Chosen))
+		{
+			DrawDebugLine(World, Points[Chosen], Points[Chosen] + FVector(0.0f, 0.0f, 600.0f), FColor::Green, false, DebugDrawPointsTime, 0, 4.0f);
+		}
+	};
+
+	auto FacingViewer = [&](const FVector& Ground)
+	{
+		return FRotator(0.0f, (ViewLocation - Ground).Rotation().Yaw, 0.0f);
+	};
+
+	// 1. Points placed in the level in advance.
+	TArray<AActor*> PointActors;
+	if (!Placement.CandidateTag.IsNone())
+	{
+		UGameplayStatics::GetAllActorsWithTag(World, Placement.CandidateTag, PointActors);
+	}
+	TArray<FVector> LevelPoints;
+	for (const AActor* PointActor : PointActors)
+	{
+		LevelPoints.Add(PointActor->GetActorLocation());
+	}
+
+	int32 Index = PrologueAppearance::ChooseBestPoint(LevelPoints, ViewLocation, ViewDir, Placement, IsVisible);
+	if (Index != INDEX_NONE)
+	{
+		DrawPoints(LevelPoints, Index);
+		const FVector Ground = LevelPoints[Index];
+		OutTransform = FTransform(FRotator(0.0f, PointActors[Index]->GetActorRotation().Yaw, 0.0f), Ground + FVector(0.0f, 0.0f, CapsuleHalfHeight));
+		OutWhere = FString::Printf(TEXT("point %s, %s"), *PointActors[Index]->GetActorNameOrLabel(), *Describe(Ground));
+		return true;
+	}
+
+	// 2. Points around the player's view, snapped to the navmesh (the hero must be able to walk from there).
+	TArray<FVector> NavPoints;
+	if (UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World))
+	{
+		for (const FVector& Point : PrologueAppearance::MakeFallbackCandidates(ViewLocation, ViewDir, Placement))
+		{
+			FNavLocation Projected;
+			if (Nav->ProjectPointToNavigation(Point, Projected, FVector(100.0f, 100.0f, 2000.0f)))
+			{
+				NavPoints.Add(Projected.Location);
+			}
+		}
+	}
+
+	Index = PrologueAppearance::ChooseBestPoint(NavPoints, ViewLocation, ViewDir, Placement, IsVisible);
+	if (Index != INDEX_NONE)
+	{
+		DrawPoints(NavPoints, Index);
+		const FVector Ground = NavPoints[Index];
+		OutTransform = FTransform(FacingViewer(Ground), Ground + FVector(0.0f, 0.0f, CapsuleHalfHeight));
+		OutWhere = FString::Printf(TEXT("around the view, %s"), *Describe(Ground));
+		return true;
+	}
+
+	// 3. Nothing visible: the scenario must go on, so take the best allowed point anyway.
+	TArray<FVector> AllPoints = LevelPoints;
+	AllPoints.Append(NavPoints);
+	Index = PrologueAppearance::ChooseBestPoint(AllPoints, ViewLocation, ViewDir, Placement, [](const FVector&) { return true; });
+	DrawPoints(AllPoints, Index);
+	if (Index == INDEX_NONE)
+	{
+		return false;
+	}
+	const FVector Ground = AllPoints[Index];
+	const FRotator Facing = (Index < PointActors.Num())
+		? FRotator(0.0f, PointActors[Index]->GetActorRotation().Yaw, 0.0f)
+		: FacingViewer(Ground);
+	OutTransform = FTransform(Facing, Ground + FVector(0.0f, 0.0f, CapsuleHalfHeight));
+	OutWhere = FString::Printf(TEXT("NOT VISIBLE (no visible point), %s"), *Describe(Ground));
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: no visible appearance point - using the best hidden one"));
+	return true;
 }
 
 bool APrologueDirector::SwitchControlTo(FName HeroId)
@@ -371,6 +550,21 @@ void APrologueDirector::TickDebug()
 		}
 	}
 
+	if (bDebugAppearKey && DebugAppearHeroKey.IsValid() && PC->WasInputKeyJustPressed(DebugAppearHeroKey))
+	{
+		// First hero of the list who is not in the level yet.
+		const FPrologueHeroEntry* Missing = Scenario->Heroes.FindByPredicate(
+			[this](const FPrologueHeroEntry& Entry) { return !Entry.HeroId.IsNone() && !IsValid(GetHero(Entry.HeroId)); });
+		if (Missing)
+		{
+			AppearHero(Missing->HeroId);
+		}
+		else
+		{
+			ShowDebug(602, 3.0f, FColor::Yellow, TEXT("Prologue: every hero is already in the level"));
+		}
+	}
+
 	if (bShowDebug)
 	{
 		const FName Controlled = GetControlledHeroId();
@@ -384,6 +578,10 @@ void APrologueDirector::TickDebug()
 		if (bDebugSwitchKey)
 		{
 			Line += FString::Printf(TEXT(" | %s: next hero"), *DebugNextHeroKey.GetDisplayName().ToString());
+		}
+		if (bDebugAppearKey)
+		{
+			Line += FString::Printf(TEXT(" | %s: missing hero appears"), *DebugAppearHeroKey.GetDisplayName().ToString());
 		}
 		ShowDebug(600, 0.0f, FColor::Cyan, Line);
 	}

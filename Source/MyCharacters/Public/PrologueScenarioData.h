@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "PrologueAppearance.h"
 #include "PrologueScenarioData.generated.h"
 
 class ABaseCharacter;
@@ -25,6 +26,22 @@ struct FPrologueHeroEntry
 	TSubclassOf<ABaseCharacter> HeroClass;
 };
 
+// How one hero enters the prologue (step 2.1): where he shows up, relative to what the player sees. The moment
+// (trigger) is added with step 2.3; until then a hero appears when APrologueDirector::AppearHero() is called
+// (debug key J, or later the scenario).
+USTRUCT(BlueprintType)
+struct FPrologueHeroAppearance
+{
+	GENERATED_BODY()
+
+	// Which hero of Heroes this rule is for.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance")
+	FName HeroId;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance")
+	FPrologueAppearancePlacement Placement;
+};
+
 // Scenario data for APrologueDirector. Lives in an asset, not in the director's Details: the director is
 // placed by rtd_build_level.py, and re-running that script resets every Details value of the actors it places.
 // Stage 1 of task 04 holds only the hero list; steps, spawn rules, camera shots and monster roles are added in
@@ -42,4 +59,9 @@ public:
 	// Hero the player controls when the prologue starts. Empty = whoever the GameMode gave the player.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Heroes")
 	FName StartingHeroId;
+
+	// Where each hero shows up when the prologue brings him in (one rule per hero). A hero without a rule appears
+	// with the default FPrologueAppearancePlacement values.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance")
+	TArray<FPrologueHeroAppearance> Appearances;
 };
