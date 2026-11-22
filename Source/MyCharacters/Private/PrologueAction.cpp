@@ -2,6 +2,8 @@
 
 #include "PrologueAction.h"
 
+#include "BaseCharacter.h"
+#include "Components/HeroScriptRunner.h"
 #include "Engine/Engine.h"
 #include "PrologueDirector.h"
 
@@ -38,4 +40,30 @@ void UPrologueAction_SwitchControl::Execute(APrologueDirector& Director) const
 FString UPrologueAction_SwitchControl::Describe() const
 {
 	return FString::Printf(TEXT("control to %s"), *HeroId.ToString());
+}
+
+void UPrologueAction_HeroScript::Execute(APrologueDirector& Director) const
+{
+	ABaseCharacter* Hero = Director.ResolveHero(HeroId);
+	UHeroScriptRunner* Runner = IsValid(Hero) ? Director.GetOrAddScriptRunner(Hero) : nullptr;
+	if (!IsValid(Runner))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: hero '%s' is not in the level - his script is skipped"), *HeroId.ToString());
+		return;
+	}
+	if (Hero->IsPlayerControlled() && Script.Commands.Num() > 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: '%s' gets a script while the player controls him - it waits until he is under AI"), *Runner->GetHeroName());
+	}
+	Runner->RunScript(Script.Commands, Script.bLoop, this, Director.GetStepSerial());
+}
+
+FString UPrologueAction_HeroScript::Describe() const
+{
+	const FString Who = HeroId.IsNone() ? FString(TEXT("player's hero")) : HeroId.ToString();
+	if (Script.Commands.Num() == 0)
+	{
+		return FString::Printf(TEXT("%s stops his script"), *Who);
+	}
+	return FString::Printf(TEXT("%s script: %d command(s)%s"), *Who, Script.Commands.Num(), Script.bLoop ? TEXT(", looping") : TEXT(""));
 }

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "HeroScriptCommand.h"
 #include "PrologueAction.generated.h"
 
 class APrologueDirector;
@@ -12,8 +13,7 @@ class APrologueDirector;
 // the scenario asset. Steps run their actions in order, all at once. Like UPrologueTrigger, actions live in the
 // DataAsset and keep no runtime state of their own.
 //
-// Stage 2.3 brings only the basic ones; hero script actions (walk, crawl, say a line...) come with step 2.5,
-// monster roles with 2.8, camera shots with stage 3.
+// Monster roles come with step 2.8, camera shots with stage 3.
 UCLASS(Abstract, EditInlineNew, DefaultToInstanced, CollapseCategories)
 class MYCHARACTERS_API UPrologueAction : public UObject
 {
@@ -68,6 +68,28 @@ class MYCHARACTERS_API UPrologueAction_SwitchControl : public UPrologueAction
 public:
 	UPROPERTY(EditAnywhere, Category = "Action")
 	FName HeroId;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
+// Gives a hero something to do on his own (step 2.5): walk/run/crawl, turn, wait, montage, a line, teleport, hide,
+// use an ability — UHeroScriptRunner runs it while the hero is under AI, in parallel with the following steps.
+// Replaces what he was doing; an empty list just stops him. With "Loop" on it is a "waiting" behaviour that goes on
+// until another script replaces it. A step can wait for it with the "Hero finished his actions" trigger.
+// For something the hero must do whoever plays him, use the "Hero does it (player or script)" trigger instead.
+UCLASS(meta = (DisplayName = "Hero script (on his own)"))
+class MYCHARACTERS_API UPrologueAction_HeroScript : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	// Whose script. Empty = the hero the player controls (it then waits until the hero is under AI again).
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName HeroId;
+
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FHeroScript Script;
 
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;

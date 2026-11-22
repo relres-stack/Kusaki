@@ -5,6 +5,7 @@
 #include "AIController.h"
 #include "BaseCharacter.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/HeroScriptRunner.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -108,6 +109,7 @@ void APrologueDirector::StartPrologue()
 void APrologueDirector::BeginStep(int32 StepIndex)
 {
 	CurrentStepIndex = StepIndex;
+	++StepSerial;
 	StepStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 
 	if (Scenario && Scenario->Steps.IsValidIndex(StepIndex))
@@ -129,6 +131,10 @@ void APrologueDirector::TickSteps()
 		return;
 	}
 	const FPrologueStep& Step = Scenario->Steps[CurrentStepIndex];
+	if (IsValid(Step.Trigger))
+	{
+		Step.Trigger->Update(*this);
+	}
 	if (!IsValid(Step.Trigger) || Step.Trigger->IsMet(*this))
 	{
 		FireCurrentStep(false);
@@ -152,6 +158,13 @@ void APrologueDirector::FireCurrentStep(bool bForcedByDebug)
 	ShowDebug(604, 3.0f, bForcedByDebug ? FColor::Orange : FColor::Green,
 		FString::Printf(TEXT("Prologue: step %d '%s' fired%s"), FiredIndex + 1, *Step.Name, bForcedByDebug ? TEXT(" (skipped)") : TEXT("")));
 
+	// First stop what the trigger itself set going (a hero's part done by script), then the actions may give the
+	// heroes new things to do.
+	if (IsValid(Step.Trigger))
+	{
+		Step.Trigger->OnStepEnd(*this);
+	}
+
 	for (const UPrologueAction* Action : Step.Actions)
 	{
 		if (IsValid(Action))
@@ -162,6 +175,37 @@ void APrologueDirector::FireCurrentStep(bool bForcedByDebug)
 	}
 
 	BeginStep(FiredIndex + 1);
+}
+
+UHeroScriptRunner* APrologueDirector::GetOrAddScriptRunner(ABaseCharacter* Hero)
+{
+	if (!IsValid(Hero))
+	{
+		return nullptr;
+	}
+	if (UHeroScriptRunner* Existing = Hero->FindComponentByClass<UHeroScriptRunner>())
+	{
+		return Existing;
+	}
+
+	// Added at runtime, not in ABaseCharacter's constructor (rule 1): only heroes the scenario uses get one.
+	UHeroScriptRunner* Runner = NewObject<UHeroScriptRunner>(Hero, TEXT("HeroScriptRunner"));
+	const FName HeroId = FindHeroId(Hero);
+	const int32 HeroIndex = Scenario ? Scenario->Heroes.IndexOfByPredicate([HeroId](const FPrologueHeroEntry& Entry) { return Entry.HeroId == HeroId; }) : INDEX_NONE;
+	Runner->Setup(this, HeroId, 610 + FMath::Clamp(HeroIndex, 0, 9));
+	Runner->OnScriptFinished.AddDynamic(this, &APrologueDirector::HandleHeroScriptFinished);
+	Runner->RegisterComponent();
+	Hero->AddInstanceComponent(Runner);
+	return Runner;
+}
+
+void APrologueDirector::HandleHeroScriptFinished(UHeroScriptRunner* Runner, bool bInterrupted)
+{
+	if (IsValid(Runner))
+	{
+		ShowDebug(607, 3.0f, bInterrupted ? FColor::Orange : FColor::Green,
+			FString::Printf(TEXT("Prologue: %s's script %s"), *Runner->GetHeroName(), bInterrupted ? TEXT("interrupted") : TEXT("done")));
+	}
 }
 
 ABaseCharacter* APrologueDirector::ResolveHero(FName HeroId) const
@@ -344,6 +388,22 @@ bool APrologueDirector::FindAppearanceTransform(const FPrologueAppearancePlaceme
 		return !World->LineTraceTestByObjectType(ViewLocation, Target, StaticOnly, TraceParams);
 	};
 
+	// A point right next to another hero or a monster is taken: two heroes appearing in the same frame would
+	// otherwise get the same best point and stand inside each other (their capsules stuck together).
+	auto IsFree = [&](const FVector& Ground)
+	{
+		for (TActorIterator<APawn> It(World); It; ++It)
+		{
+			const FVector PawnLocation = It->GetActorLocation();
+			if (FVector::Dist2D(PawnLocation, Ground) < AppearanceFreeRadius && FMath::Abs(PawnLocation.Z - Ground.Z) < 300.0f)
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	auto IsUsable = [&](const FVector& Ground) { return IsFree(Ground) && IsVisible(Ground); };
+
 	auto Describe = [&](const FVector& Ground)
 	{
 		return FString::Printf(TEXT("%.1f m, %.0f deg from the view"), FVector::Dist2D(ViewLocation, Ground) / 100.0f,
@@ -385,7 +445,7 @@ bool APrologueDirector::FindAppearanceTransform(const FPrologueAppearancePlaceme
 		LevelPoints.Add(PointActor->GetActorLocation());
 	}
 
-	int32 Index = PrologueAppearance::ChooseBestPoint(LevelPoints, ViewLocation, ViewDir, Placement, IsVisible);
+	int32 Index = PrologueAppearance::ChooseBestPoint(LevelPoints, ViewLocation, ViewDir, Placement, IsUsable);
 	if (Index != INDEX_NONE)
 	{
 		DrawPoints(LevelPoints, Index);
@@ -409,7 +469,7 @@ bool APrologueDirector::FindAppearanceTransform(const FPrologueAppearancePlaceme
 		}
 	}
 
-	Index = PrologueAppearance::ChooseBestPoint(NavPoints, ViewLocation, ViewDir, Placement, IsVisible);
+	Index = PrologueAppearance::ChooseBestPoint(NavPoints, ViewLocation, ViewDir, Placement, IsUsable);
 	if (Index != INDEX_NONE)
 	{
 		DrawPoints(NavPoints, Index);
@@ -419,10 +479,14 @@ bool APrologueDirector::FindAppearanceTransform(const FPrologueAppearancePlaceme
 		return true;
 	}
 
-	// 3. Nothing visible: the scenario must go on, so take the best allowed point anyway.
+	// 3. Nothing visible: the scenario must go on, so take the best allowed point anyway (a free one if possible).
 	TArray<FVector> AllPoints = LevelPoints;
 	AllPoints.Append(NavPoints);
-	Index = PrologueAppearance::ChooseBestPoint(AllPoints, ViewLocation, ViewDir, Placement, [](const FVector&) { return true; });
+	Index = PrologueAppearance::ChooseBestPoint(AllPoints, ViewLocation, ViewDir, Placement, IsFree);
+	if (Index == INDEX_NONE)
+	{
+		Index = PrologueAppearance::ChooseBestPoint(AllPoints, ViewLocation, ViewDir, Placement, [](const FVector&) { return true; });
+	}
 	DrawPoints(AllPoints, Index);
 	if (Index == INDEX_NONE)
 	{
@@ -692,6 +756,23 @@ void APrologueDirector::TickDebug()
 		else if (Scenario->Steps.Num() > 0)
 		{
 			ShowDebug(603, 0.0f, FColor::Cyan, FString::Printf(TEXT("Prologue: all %d step(s) done"), Scenario->Steps.Num()));
+		}
+
+		// Third line: what every hero who got a script is doing.
+		TArray<FString> Scripts;
+		for (const FPrologueHeroEntry& Entry : Scenario->Heroes)
+		{
+			const ABaseCharacter* Hero = GetHero(Entry.HeroId);
+			const UHeroScriptRunner* Runner = IsValid(Hero) ? Hero->FindComponentByClass<UHeroScriptRunner>() : nullptr;
+			if (IsValid(Runner))
+			{
+				Scripts.Add(FString::Printf(TEXT("%s: %s"), *Entry.HeroId.ToString(), *Runner->DescribeState()));
+				Runner->DrawDebug();
+			}
+		}
+		if (Scripts.Num() > 0)
+		{
+			ShowDebug(606, 0.0f, FColor::Cyan, TEXT("Hero scripts: ") + FString::Join(Scripts, TEXT(" | ")));
 		}
 	}
 }

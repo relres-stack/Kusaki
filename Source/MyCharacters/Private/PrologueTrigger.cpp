@@ -7,7 +7,9 @@
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 #include "FingerFlamePeekComponent.h"
+#include "Components/HeroScriptRunner.h"
 #include "Components/VisionFireSourceComponent.h"
+#include "HeroScriptCommand.h"
 #include "Kismet/GameplayStatics.h"
 #include "PrologueDirector.h"
 
@@ -204,6 +206,50 @@ void UPrologueTrigger_AllOf::DrawDebug(const APrologueDirector& Director) const
 	}
 }
 
+void UPrologueTrigger_AllOf::Update(APrologueDirector& Director) const
+{
+	for (const UPrologueTrigger* Condition : Conditions)
+	{
+		if (IsValid(Condition))
+		{
+			Condition->Update(Director);
+		}
+	}
+}
+
+void UPrologueTrigger_AllOf::OnStepEnd(APrologueDirector& Director) const
+{
+	for (const UPrologueTrigger* Condition : Conditions)
+	{
+		if (IsValid(Condition))
+		{
+			Condition->OnStepEnd(Director);
+		}
+	}
+}
+
+void UPrologueTrigger_AnyOf::Update(APrologueDirector& Director) const
+{
+	for (const UPrologueTrigger* Condition : Conditions)
+	{
+		if (IsValid(Condition))
+		{
+			Condition->Update(Director);
+		}
+	}
+}
+
+void UPrologueTrigger_AnyOf::OnStepEnd(APrologueDirector& Director) const
+{
+	for (const UPrologueTrigger* Condition : Conditions)
+	{
+		if (IsValid(Condition))
+		{
+			Condition->OnStepEnd(Director);
+		}
+	}
+}
+
 void UPrologueTrigger_AnyOf::DrawDebug(const APrologueDirector& Director) const
 {
 	for (const UPrologueTrigger* Condition : Conditions)
@@ -251,4 +297,106 @@ FString UPrologueTrigger_AnyOf::DescribeCondition() const
 		}
 	}
 	return FString::Printf(TEXT("(%s)"), *FString::Join(Parts, TEXT(" OR ")));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Hero does it (player or script)
+
+void UPrologueTrigger_HeroTask::Update(APrologueDirector& Director) const
+{
+	if (IsValid(WhenPlayer))
+	{
+		WhenPlayer->Update(Director);
+	}
+
+	ABaseCharacter* Hero = Director.GetHero(HeroId);
+	if (!IsValid(Hero) || Hero->IsPlayerControlled() || WhenAI.Num() == 0)
+	{
+		return;
+	}
+	// Under AI: make sure he is doing it. Started once per run of the step; if control went to the player and back,
+	// the runner itself goes on with the same script.
+	UHeroScriptRunner* Runner = Director.GetOrAddScriptRunner(Hero);
+	const int32 Serial = Director.GetStepSerial();
+	if (IsValid(Runner) && !Runner->IsRunning(this, Serial) && !Runner->HasFinished(this, Serial))
+	{
+		Runner->RunScript(WhenAI, false, this, Serial);
+	}
+}
+
+void UPrologueTrigger_HeroTask::OnStepEnd(APrologueDirector& Director) const
+{
+	if (IsValid(WhenPlayer))
+	{
+		WhenPlayer->OnStepEnd(Director);
+	}
+	// The step is over (the player did it, or it was skipped): the hero must not go on with this part later.
+	const ABaseCharacter* Hero = Director.GetHero(HeroId);
+	UHeroScriptRunner* Runner = IsValid(Hero) ? Hero->FindComponentByClass<UHeroScriptRunner>() : nullptr;
+	if (IsValid(Runner) && Runner->IsRunning(this, Director.GetStepSerial()))
+	{
+		Runner->StopScript();
+	}
+}
+
+bool UPrologueTrigger_HeroTask::Check(const APrologueDirector& Director) const
+{
+	const ABaseCharacter* Hero = Director.GetHero(HeroId);
+	if (!IsValid(Hero))
+	{
+		return false;
+	}
+	if (Hero->IsPlayerControlled())
+	{
+		return !IsValid(WhenPlayer) || WhenPlayer->IsMet(Director);
+	}
+	if (WhenAI.Num() == 0)
+	{
+		return true;
+	}
+	const UHeroScriptRunner* Runner = Hero->FindComponentByClass<UHeroScriptRunner>();
+	return IsValid(Runner) && Runner->HasFinished(this, Director.GetStepSerial());
+}
+
+void UPrologueTrigger_HeroTask::DrawDebug(const APrologueDirector& Director) const
+{
+	// The player's goal (the zone) is drawn in both modes: under AI it shows where the hero is heading too.
+	if (IsValid(WhenPlayer))
+	{
+		WhenPlayer->DrawDebug(Director);
+	}
+}
+
+FString UPrologueTrigger_HeroTask::DescribeCondition() const
+{
+	TArray<FString> Commands;
+	for (const UHeroScriptCommand* Command : WhenAI)
+	{
+		if (IsValid(Command))
+		{
+			Commands.Add(Command->Describe());
+		}
+	}
+	return FString::Printf(TEXT("%s does it [player: %s | AI: %s]"), *HeroName(HeroId),
+		IsValid(WhenPlayer) ? *WhenPlayer->Describe() : TEXT("right away"),
+		Commands.Num() > 0 ? *FString::Join(Commands, TEXT(", ")) : TEXT("right away"));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Hero finished his actions
+
+bool UPrologueTrigger_HeroScriptDone::Check(const APrologueDirector& Director) const
+{
+	const ABaseCharacter* Hero = Director.ResolveHero(HeroId);
+	if (!IsValid(Hero))
+	{
+		return false;
+	}
+	const UHeroScriptRunner* Runner = Hero->FindComponentByClass<UHeroScriptRunner>();
+	return !IsValid(Runner) || !Runner->IsBusy();
+}
+
+FString UPrologueTrigger_HeroScriptDone::DescribeCondition() const
+{
+	return FString::Printf(TEXT("%s finished his actions"), *HeroName(HeroId));
 }

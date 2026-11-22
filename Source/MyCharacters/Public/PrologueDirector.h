@@ -11,6 +11,7 @@ class AAIController;
 class ABaseCharacter;
 class AIntroSceneDirector;
 class APlayerController;
+class UHeroScriptRunner;
 class UPrologueScenarioData;
 struct FPrologueAppearancePlacement;
 struct FPrologueHeroEntry;
@@ -32,7 +33,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPrologueHeroSwitched, FName, NewH
 //
 // Task 04 (.claude/tasks/04-prolog-smena-geroev.md). Done so far: hero registry, spawning, switching (stage 1);
 // where a hero appears (AppearHero(), step 2.1); scenario steps = trigger + actions (Scenario->Steps, step 2.3,
-// see UPrologueTrigger/UPrologueAction). Hero script actions, monster roles and camera shots come next.
+// see UPrologueTrigger/UPrologueAction); heroes acting on their own (UHeroScriptRunner, step 2.5) and a hero's part
+// that works whoever plays him (UPrologueTrigger_HeroTask, step 2.4). Monster roles and camera shots come next.
 UCLASS()
 class MYCHARACTERS_API APrologueDirector : public AActor
 {
@@ -87,7 +89,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug", meta = (ClampMin = "0.0"))
 	float DebugDrawPointsTime = 8.0f;
 
-	// Debug readout on screen (keys 600-609): who is controlled, which heroes exist.
+	// AppearHero(): a point closer than this (flat, cm) to another hero or a monster counts as taken.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue", meta = (ClampMin = "50.0"))
+	float AppearanceFreeRadius = 150.0f;
+
+	// Debug readout on screen (keys 600-609): who is controlled, which heroes exist, the current step, what each
+	// hero's script is doing. Hero lines (subtitles of "Say a line") use keys 610+ and show regardless.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug")
 	bool bShowDebug = true;
 
@@ -131,6 +138,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Prologue")
 	float GetStepElapsedTime() const;
 
+	// Goes up every time a step begins: tells one run of a step from another (a step run again after a restart
+	// from a checkpoint must not see the hero script of its previous run as done).
+	int32 GetStepSerial() const { return StepSerial; }
+
+	// The hero's script runner (step 2.5), added to him the first time the scenario gives him something to do.
+	UFUNCTION(BlueprintCallable, Category = "Prologue")
+	UHeroScriptRunner* GetOrAddScriptRunner(ABaseCharacter* Hero);
+
 	// Fired after control has passed to another hero.
 	UPROPERTY(BlueprintAssignable, Category = "Prologue")
 	FOnPrologueHeroSwitched OnHeroSwitched;
@@ -172,6 +187,9 @@ private:
 	void BeginStep(int32 StepIndex);
 	void FireCurrentStep(bool bForcedByDebug);
 
+	UFUNCTION()
+	void HandleHeroScriptFinished(UHeroScriptRunner* Runner, bool bInterrupted);
+
 	void TickDebug();
 	void ShowDebug(int32 Key, float Time, const FColor& Color, const FString& Message) const;
 
@@ -188,6 +206,7 @@ private:
 	int32 StartAttempts = 0;
 
 	int32 CurrentStepIndex = INDEX_NONE;
+	int32 StepSerial = 0;
 	double StepStartTime = 0.0;
 	FTimerHandle StartRetryHandle;
 };
