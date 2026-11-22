@@ -8,6 +8,8 @@
 #include "PrologueScenarioData.generated.h"
 
 class ABaseCharacter;
+class UPrologueAction;
+class UPrologueTrigger;
 
 // One hero who takes part in the prologue.
 USTRUCT(BlueprintType)
@@ -42,6 +44,27 @@ struct FPrologueHeroAppearance
 	FPrologueAppearancePlacement Placement;
 };
 
+// One step of the scenario (step 2.3): waits for its trigger, then runs its actions in order and the director
+// moves on to the next step. Steps run one after another; things that go on in parallel (a hero walking on his
+// own) are started by an action and keep running while later steps wait.
+USTRUCT(BlueprintType)
+struct FPrologueStep
+{
+	GENERATED_BODY()
+
+	// For the debug readout and the log ("Redneck reaches the wasteland").
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Step")
+	FString Name;
+
+	// When the step fires. Empty = right away.
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category = "Step")
+	TObjectPtr<UPrologueTrigger> Trigger;
+
+	// What happens when it fires, in order.
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category = "Step")
+	TArray<TObjectPtr<UPrologueAction>> Actions;
+};
+
 // Scenario data for APrologueDirector. Lives in an asset, not in the director's Details: the director is
 // placed by rtd_build_level.py, and re-running that script resets every Details value of the actors it places.
 // Stage 1 of task 04 holds only the hero list; steps, spawn rules, camera shots and monster roles are added in
@@ -64,4 +87,8 @@ public:
 	// with the default FPrologueAppearancePlacement values.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance")
 	TArray<FPrologueHeroAppearance> Appearances;
+
+	// The scenario, step by step. Empty = the director only registers heroes (debug keys still work).
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Steps")
+	TArray<FPrologueStep> Steps;
 };

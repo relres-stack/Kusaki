@@ -30,8 +30,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPrologueHeroSwitched, FName, NewH
 // Monsters, HUD and input then follow the player's hero by the engine's own means: monsters only ever target
 // GetPlayerCharacter(0), ABaseCharacter builds its HUD on possession and removes it in UnPossessed().
 //
-// Stage 1 of task 04 (.claude/tasks/04-prolog-smena-geroev.md): hero registry, spawning, switching, debug key.
-// Scenario steps, camera shots and monster roles come in the next stages.
+// Task 04 (.claude/tasks/04-prolog-smena-geroev.md). Done so far: hero registry, spawning, switching (stage 1);
+// where a hero appears (AppearHero(), step 2.1); scenario steps = trigger + actions (Scenario->Steps, step 2.3,
+// see UPrologueTrigger/UPrologueAction). Hero script actions, monster roles and camera shots come next.
 UCLASS()
 class MYCHARACTERS_API APrologueDirector : public AActor
 {
@@ -74,6 +75,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug")
 	FKey DebugAppearHeroKey = EKeys::J;
 
+	// Debug: this key fires the current step right away, without waiting for its trigger.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug")
+	bool bDebugSkipStepKey = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug")
+	FKey DebugSkipStepKey = EKeys::K;
+
 	// Debug: after AppearHero() the candidate points stay drawn this long (green = chosen, red = allowed but
 	// hidden or worse, grey = outside the distance/angle limits). 0 = not drawn.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug", meta = (ClampMin = "0.0"))
@@ -110,6 +118,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Prologue")
 	bool HasStarted() const { return bStarted; }
 
+	// Hero by name for triggers and actions: an empty HeroId means the hero the player controls right now.
+	UFUNCTION(BlueprintPure, Category = "Prologue")
+	ABaseCharacter* ResolveHero(FName HeroId) const;
+
+	// Index into Scenario->Steps of the step waiting now; equal to the number of steps once they are all done,
+	// INDEX_NONE before the prologue starts.
+	UFUNCTION(BlueprintPure, Category = "Prologue")
+	int32 GetCurrentStepIndex() const { return CurrentStepIndex; }
+
+	// Seconds the current step has been waiting for its trigger (UPrologueTrigger_TimeElapsed).
+	UFUNCTION(BlueprintPure, Category = "Prologue")
+	float GetStepElapsedTime() const;
+
 	// Fired after control has passed to another hero.
 	UPROPERTY(BlueprintAssignable, Category = "Prologue")
 	FOnPrologueHeroSwitched OnHeroSwitched;
@@ -145,6 +166,12 @@ private:
 	// The player takes the hero: aiming allowed again.
 	void ReleaseFromAI(ABaseCharacter* Hero);
 
+	// Runs the scenario steps: while the current step's trigger is met (or it has none), runs its actions and
+	// moves on. At most one step per frame, so a chain of steps without triggers still reads in order in the log.
+	void TickSteps();
+	void BeginStep(int32 StepIndex);
+	void FireCurrentStep(bool bForcedByDebug);
+
 	void TickDebug();
 	void ShowDebug(int32 Key, float Time, const FColor& Color, const FString& Message) const;
 
@@ -159,5 +186,8 @@ private:
 
 	bool bStarted = false;
 	int32 StartAttempts = 0;
+
+	int32 CurrentStepIndex = INDEX_NONE;
+	double StepStartTime = 0.0;
 	FTimerHandle StartRetryHandle;
 };

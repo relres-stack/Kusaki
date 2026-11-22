@@ -13,8 +13,10 @@
 #include "IntroSceneDirector.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
+#include "PrologueAction.h"
 #include "PrologueAppearance.h"
 #include "PrologueScenarioData.h"
+#include "PrologueTrigger.h"
 #include "TimerManager.h"
 
 APrologueDirector::APrologueDirector()
@@ -97,8 +99,80 @@ void APrologueDirector::StartPrologue()
 		SwitchControlTo(Scenario->StartingHeroId);
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("Prologue: started, %d hero(es), player controls '%s'"), Heroes.Num(), *GetControlledHeroId().ToString());
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: started, %d hero(es), player controls '%s', %d step(s)"),
+		Heroes.Num(), *GetControlledHeroId().ToString(), Scenario->Steps.Num());
+	BeginStep(0);
 	SetActorTickEnabled(true);
+}
+
+void APrologueDirector::BeginStep(int32 StepIndex)
+{
+	CurrentStepIndex = StepIndex;
+	StepStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+
+	if (Scenario && Scenario->Steps.IsValidIndex(StepIndex))
+	{
+		const FPrologueStep& Step = Scenario->Steps[StepIndex];
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: step %d '%s' waits for: %s"), StepIndex + 1, *Step.Name,
+			IsValid(Step.Trigger) ? *Step.Trigger->Describe() : TEXT("nothing (fires right away)"));
+	}
+	else if (Scenario && StepIndex == Scenario->Steps.Num() && StepIndex > 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: all %d step(s) done"), StepIndex);
+	}
+}
+
+void APrologueDirector::TickSteps()
+{
+	if (!Scenario || !Scenario->Steps.IsValidIndex(CurrentStepIndex))
+	{
+		return;
+	}
+	const FPrologueStep& Step = Scenario->Steps[CurrentStepIndex];
+	if (!IsValid(Step.Trigger) || Step.Trigger->IsMet(*this))
+	{
+		FireCurrentStep(false);
+	}
+}
+
+void APrologueDirector::FireCurrentStep(bool bForcedByDebug)
+{
+	if (!Scenario || !Scenario->Steps.IsValidIndex(CurrentStepIndex))
+	{
+		return;
+	}
+
+	// The step is read straight from the asset: actions may switch heroes or spawn actors, but never edit the
+	// scenario, so the reference stays valid while they run.
+	const int32 FiredIndex = CurrentStepIndex;
+	const FPrologueStep& Step = Scenario->Steps[FiredIndex];
+
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: step %d '%s' fired%s after %.1f s"), FiredIndex + 1, *Step.Name,
+		bForcedByDebug ? TEXT(" (debug skip)") : TEXT(""), GetStepElapsedTime());
+	ShowDebug(604, 3.0f, bForcedByDebug ? FColor::Orange : FColor::Green,
+		FString::Printf(TEXT("Prologue: step %d '%s' fired%s"), FiredIndex + 1, *Step.Name, bForcedByDebug ? TEXT(" (skipped)") : TEXT("")));
+
+	for (const UPrologueAction* Action : Step.Actions)
+	{
+		if (IsValid(Action))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Prologue:   - %s"), *Action->Describe());
+			Action->Execute(*this);
+		}
+	}
+
+	BeginStep(FiredIndex + 1);
+}
+
+ABaseCharacter* APrologueDirector::ResolveHero(FName HeroId) const
+{
+	return HeroId.IsNone() ? Cast<ABaseCharacter>(UGameplayStatics::GetPlayerPawn(this, 0)) : GetHero(HeroId);
+}
+
+float APrologueDirector::GetStepElapsedTime() const
+{
+	const UWorld* World = GetWorld();
+	return World ? static_cast<float>(World->GetTimeSeconds() - StepStartTime) : 0.0f;
 }
 
 void APrologueDirector::RegisterExistingHeroes()
@@ -520,6 +594,7 @@ void APrologueDirector::ReleaseFromAI(ABaseCharacter* Hero)
 void APrologueDirector::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	TickSteps();
 	TickDebug();
 }
 
@@ -565,6 +640,18 @@ void APrologueDirector::TickDebug()
 		}
 	}
 
+	if (bDebugSkipStepKey && DebugSkipStepKey.IsValid() && PC->WasInputKeyJustPressed(DebugSkipStepKey))
+	{
+		if (Scenario->Steps.IsValidIndex(CurrentStepIndex))
+		{
+			FireCurrentStep(true);
+		}
+		else
+		{
+			ShowDebug(604, 3.0f, FColor::Yellow, TEXT("Prologue: no step left to skip"));
+		}
+	}
+
 	if (bShowDebug)
 	{
 		const FName Controlled = GetControlledHeroId();
@@ -584,6 +671,28 @@ void APrologueDirector::TickDebug()
 			Line += FString::Printf(TEXT(" | %s: missing hero appears"), *DebugAppearHeroKey.GetDisplayName().ToString());
 		}
 		ShowDebug(600, 0.0f, FColor::Cyan, Line);
+
+		// Second line: which step waits for what.
+		if (Scenario->Steps.IsValidIndex(CurrentStepIndex))
+		{
+			const FPrologueStep& Step = Scenario->Steps[CurrentStepIndex];
+			const FString Waiting = IsValid(Step.Trigger) ? Step.Trigger->Describe() : FString(TEXT("nothing"));
+			if (IsValid(Step.Trigger))
+			{
+				Step.Trigger->DrawDebug(*this);
+			}
+			FString StepLine = FString::Printf(TEXT("Prologue step %d/%d '%s' (%.0f s) waits for: %s"), CurrentStepIndex + 1,
+				Scenario->Steps.Num(), *Step.Name, GetStepElapsedTime(), *Waiting);
+			if (bDebugSkipStepKey)
+			{
+				StepLine += FString::Printf(TEXT(" | %s: fire it now"), *DebugSkipStepKey.GetDisplayName().ToString());
+			}
+			ShowDebug(603, 0.0f, FColor::Cyan, StepLine);
+		}
+		else if (Scenario->Steps.Num() > 0)
+		{
+			ShowDebug(603, 0.0f, FColor::Cyan, FString::Printf(TEXT("Prologue: all %d step(s) done"), Scenario->Steps.Num()));
+		}
 	}
 }
 
