@@ -8,10 +8,15 @@
 //   (c) bSkipOtherGroups: a monster already in another group is not picked; without it the monster moves over and
 //       leaves the first group.
 //   (d) Picking the group again: previous members not picked again go back to their own AI.
+//   (e) "Monster group: do once" (step 2.8b): Stun with MaxCount 1 stuns only the member nearest to the hero;
+//       KnockBack with a Radius staggers the members within it and not the far one.
 #include "Misc/AutomationTest.h"
+#include "BaseCharacter.h"
 #include "BaseMonster.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "PrologueAction.h"
 #include "PrologueDirector.h"
 #include "PrologueMonsterRole.h"
 
@@ -109,6 +114,43 @@ bool FPrologueMonsterGroupsTest::RunTest(const FString& Parameters)
 		Director->SelectMonsterGroup(TEXT("B"), NearOnly);
 		bPassed &= TestFalse(TEXT("(d) Far dropped from B - its own AI again"), Far->IsScriptControlled());
 		bPassed &= TestTrue(TEXT("(d) Near stays in B under the role"), Near->IsScriptControlled());
+	}
+
+	// (e) One-off actions. They count from a hero: a player's hero at the origin (an empty HeroId = him).
+	{
+		ABaseCharacter* Hero = World->SpawnActor<ABaseCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+		APlayerController* PC = World->SpawnActor<APlayerController>();
+		bPassed &= TestNotNull(TEXT("(e) Hero"), Hero) && TestNotNull(TEXT("(e) PlayerController"), PC);
+		if (Hero && PC)
+		{
+			World->AddController(PC);
+			PC->Possess(Hero);
+			bPassed &= TestTrue(TEXT("(e) The empty HeroId resolves to our hero"), Director->ResolveHero(NAME_None) == Hero);
+
+			FPrologueMonsterSelection All;
+			All.Radius = 0.0f;
+			All.bSkipOtherGroups = false;
+			bPassed &= TestEqual(TEXT("(e) Group D takes all three"), Director->SelectMonsterGroup(TEXT("D"), All), 3);
+
+			UPrologueAction_MonsterGroupDo* StunOne = NewObject<UPrologueAction_MonsterGroupDo>();
+			StunOne->GroupName = TEXT("D");
+			StunOne->What = EPrologueMonsterGroupDo::Stun;
+			StunOne->MaxCount = 1;
+			StunOne->Execute(*Director);
+			bPassed &= TestTrue(TEXT("(e) Stun, nearest 1: Near is stunned"), Near->IsStunned());
+			bPassed &= TestFalse(TEXT("(e) ... Middle is not"), Middle->IsStunned());
+
+			UPrologueAction_MonsterGroupDo* Bounce = NewObject<UPrologueAction_MonsterGroupDo>();
+			Bounce->GroupName = TEXT("D");
+			Bounce->What = EPrologueMonsterGroupDo::KnockBack;
+			Bounce->Radius = 1000.0f;
+			Bounce->Execute(*Director);
+			bPassed &= TestTrue(TEXT("(e) KnockBack within 10 m: Middle is staggered"), Middle->bIsStaggered);
+			bPassed &= TestFalse(TEXT("(e) ... Far (30 m) is not"), Far->bIsStaggered);
+
+			Hero->Destroy();
+			PC->Destroy();
+		}
 	}
 
 	GEngine->DestroyWorldContext(World);

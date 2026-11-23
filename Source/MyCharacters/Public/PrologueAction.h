@@ -153,6 +153,66 @@ public:
 	virtual FString Describe() const override;
 };
 
+// What "Monster group: do once" does (step 2.8b).
+UENUM(BlueprintType)
+enum class EPrologueMonsterGroupDo : uint8
+{
+	// Thrown back away from the hero (ABaseMonster::ApplyKnockback) — "bounces off the candle".
+	KnockBack	UMETA(DisplayName = "Bounce off the hero (knockback)"),
+	// Stands stunned for StunDuration (ABaseMonster::Stun).
+	Stun		UMETA(DisplayName = "Stun"),
+	// Plays its attack swing, nobody is hit (ABaseMonster::PlayAttackAnimation).
+	Swing		UMETA(DisplayName = "Swing (no hit)"),
+	// The nearest chosen monster calls the pack (ABaseMonster::BroadcastAlert): monsters on their own AI within
+	// its alert radius of the spot come running. Monsters in a role do not answer.
+	CallOthers	UMETA(DisplayName = "Call the others (pack alert)"),
+};
+
+// Something done once to monsters of a group (step 2.8b), on top of whatever role it has: bounce them off a hero,
+// stun them, make one swing, make one call the others. "Who" is counted from the hero, nearest first.
+UCLASS(meta = (DisplayName = "Monster group: do once"))
+class MYCHARACTERS_API UPrologueAction_MonsterGroupDo : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName GroupName = TEXT("Pack");
+
+	UPROPERTY(EditAnywhere, Category = "Action")
+	EPrologueMonsterGroupDo What = EPrologueMonsterGroupDo::KnockBack;
+
+	// From whom: knockback goes away from him, the call is made to his spot, the monsters are counted from him.
+	// Empty = the hero the player controls.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName HeroId;
+
+	// Only members this close to the hero (flat, cm). 0 = any distance.
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0.0"))
+	float Radius = 0.0f;
+
+	// At most this many, the nearest to the hero first. 0 = all that are close enough.
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0"))
+	int32 MaxCount = 0;
+
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (EditCondition = "What == EPrologueMonsterGroupDo::KnockBack", EditConditionHides, ClampMin = "0.0"))
+	float PushForce = 800.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (EditCondition = "What == EPrologueMonsterGroupDo::KnockBack", EditConditionHides, ClampMin = "0.0"))
+	float UpwardForce = 150.0f;
+
+	// Seconds.
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (EditCondition = "What == EPrologueMonsterGroupDo::Stun", EditConditionHides, ClampMin = "0.1"))
+	float StunDuration = 3.0f;
+
+	// On: the pack is called to the hero's spot. Off: to where the calling monster stands.
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (EditCondition = "What == EPrologueMonsterGroupDo::CallOthers", EditConditionHides))
+	bool bCallToHero = true;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
 // A named group of monsters gets a scripted role (step 2.8): surround a hero, run to him, ... Their own AI is off while
 // the role lasts. Later steps refer to the same group by its name (give it another role, wait for "Monsters of a group
 // near hero"). An empty role sends the group back to its own AI.
