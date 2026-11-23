@@ -148,6 +148,33 @@ protected:
 	virtual FString DescribeCondition() const override;
 };
 
+// At least MinCount living monsters of a group (step 2.8, "Monster group: role") are near the hero: "the pack has
+// closed in". With Invert: fewer than MinCount — "the Priest has driven them off the Redneck".
+UCLASS(meta = (DisplayName = "Monsters of a group near hero"))
+class MYCHARACTERS_API UPrologueTrigger_MonsterGroupNear : public UPrologueTrigger
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	FName GroupName = TEXT("Pack");
+
+	// Around whom. Empty = the hero the player controls.
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	FName HeroId;
+
+	// Flat distance, cm.
+	UPROPERTY(EditAnywhere, Category = "Trigger", meta = (ClampMin = "0.0"))
+	float Radius = 500.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Trigger", meta = (ClampMin = "1"))
+	int32 MinCount = 1;
+
+protected:
+	virtual bool Check(const APrologueDirector& Director) const override;
+	virtual FString DescribeCondition() const override;
+};
+
 // Every condition at once (e.g. "in the zone AND eyes closed"). Empty = met.
 UCLASS(meta = (DisplayName = "All of"))
 class MYCHARACTERS_API UPrologueTrigger_AllOf : public UPrologueTrigger

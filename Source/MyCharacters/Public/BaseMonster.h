@@ -275,6 +275,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "AI")
 	void Stun(float Duration);
 
+	// Read-only: true while a Stun()/ApplyStun() is running. For outside drivers (APrologueDirector's monster roles,
+	// task 04 step 2.8) that must not issue moves to a stunned monster — Stun() only cancels the current move.
+	UFUNCTION(BlueprintPure, Category = "AI")
+	bool IsStunned() const { return bIsStunned; }
+
 	// Kills this monster immediately — same death sequence as the Censer's instant-death aura
 	// (HandleDeath(): stops AI permanently, disables capsule collision, plays burn effects, and
 	// destroys the actor after a short delay). Callable directly (e.g. a thrown Censer's impact)

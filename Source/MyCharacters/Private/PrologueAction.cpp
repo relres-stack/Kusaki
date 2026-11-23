@@ -114,6 +114,20 @@ void UPrologueAction_HeroUntouchable::Execute(APrologueDirector& Director) const
 	Director.SetHeroUntouchable(Id, bUntouchable);
 }
 
+void UPrologueAction_MonsterRole::Execute(APrologueDirector& Director) const
+{
+	if (bSelectMonsters)
+	{
+		Director.SelectMonsterGroup(GroupName, Selection);
+	}
+	Director.SetMonsterGroupRole(GroupName, Role, Duration, bReleaseOnControlSwitch);
+}
+
+FString UPrologueAction_MonsterRole::Describe() const
+{
+	return FString::Printf(TEXT("monster group '%s': %s"), *GroupName.ToString(), Role ? *Role->Describe() : TEXT("back to their own AI"));
+}
+
 FString UPrologueAction_HeroUntouchable::Describe() const
 {
 	const FString Who = HeroId.IsNone() ? FString(TEXT("player's hero")) : HeroId.ToString();

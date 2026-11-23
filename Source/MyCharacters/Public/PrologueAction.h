@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
 #include "HeroScriptCommand.h"
+#include "PrologueMonsterRole.h"
 #include "PrologueAction.generated.h"
 
 class APrologueDirector;
@@ -147,6 +148,42 @@ public:
 	// On: protected from now on. Off: ordinary rules again (unless he is under AI or lying after a protected fall).
 	UPROPERTY(EditAnywhere, Category = "Action")
 	bool bUntouchable = true;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
+// A named group of monsters gets a scripted role (step 2.8): surround a hero, run to him, ... Their own AI is off while
+// the role lasts. Later steps refer to the same group by its name (give it another role, wait for "Monsters of a group
+// near hero"). An empty role sends the group back to its own AI.
+UCLASS(meta = (DisplayName = "Monster group: role"))
+class MYCHARACTERS_API UPrologueAction_MonsterRole : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName GroupName = TEXT("Pack");
+
+	// On: pick the group's monsters now by Selection (its previous members go back to their own AI). Off: the same
+	// monsters as before get the new role.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bSelectMonsters = true;
+
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (EditCondition = "bSelectMonsters"))
+	FPrologueMonsterSelection Selection;
+
+	// Empty = back to their own AI (the group keeps its monsters for a later role).
+	UPROPERTY(EditAnywhere, Instanced, Category = "Action")
+	TObjectPtr<UPrologueMonsterRole> Role;
+
+	// Seconds the role lasts, then their own AI again. 0 = until another step changes it.
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0.0"))
+	float Duration = 0.0f;
+
+	// The role ends when control passes to another hero.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bReleaseOnControlSwitch = false;
 
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;

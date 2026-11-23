@@ -5,10 +5,12 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "InputCoreTypes.h"
+#include "PrologueMonsterRole.h"
 #include "PrologueDirector.generated.h"
 
 class AAIController;
 class ABaseCharacter;
+class ABaseMonster;
 class AIntroSceneDirector;
 class APlayerController;
 class UHeroScriptRunner;
@@ -156,6 +158,30 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Prologue")
 	void SetHeroUntouchable(FName HeroId, bool bUntouchable);
 
+	// Step 2.8. Picks the monsters of group GroupName by Selection; they replace its previous members (those not
+	// picked again go back to their own AI), and a monster picked away from another group leaves that group. Returns
+	// how many were picked. If the group already has a role, the new members take it at once.
+	int32 SelectMonsterGroup(FName GroupName, const FPrologueMonsterSelection& Selection);
+
+	// Gives group GroupName a role: their own AI is switched off and the role drives them every frame. Null = they go
+	// back to their own AI, the group keeps its members. Duration > 0: the role ends by itself after that many
+	// seconds; bReleaseOnControlSwitch: it ends when control passes to another hero.
+	void SetMonsterGroupRole(FName GroupName, UPrologueMonsterRole* NewRole, float Duration, bool bReleaseOnControlSwitch);
+
+	// The group's living members (empty if there is no such group).
+	UFUNCTION(BlueprintPure, Category = "Prologue|Monsters")
+	TArray<ABaseMonster*> GetMonsterGroup(FName GroupName) const;
+
+	// Name of the group the monster is in, None if in none.
+	FName FindMonsterGroupOf(const ABaseMonster* Monster) const;
+
+	// Largest light radius (cm) of the hero's lit held items; 0 = no light.
+	float GetHeroLightRadius(const ABaseCharacter* Hero) const;
+
+	// Goal moved out of every prologue hero's light (lit held item: its radius + the monster's StalkSafetyBuffer, a
+	// candle only inside its cone), so a role monster holds at the light's edge instead of walking into it.
+	FVector KeepOutOfHeroLight(const FVector& Goal, const ABaseMonster& Monster) const;
+
 	// Fired after control has passed to another hero.
 	UPROPERTY(BlueprintAssignable, Category = "Prologue")
 	FOnPrologueHeroSwitched OnHeroSwitched;
@@ -196,6 +222,18 @@ private:
 	void UpdateHeroProtection(ABaseCharacter* Hero, FName HeroId);
 	void UpdateAllHeroProtection();
 
+	// Step 2.8: every frame, each group's role drives its members; dead and ridden members fall out, a role whose
+	// time is up ends.
+	void TickMonsterRoles();
+
+	// The monster goes back to its own AI from wherever it stands (focus cleared, its speed for its state).
+	void ReleaseMonster(ABaseMonster* Monster) const;
+
+	// Ring places in the order the members stand around the role's hero (FPrologueRoleMemberState::SlotIndex).
+	void AssignRoleSlots(FPrologueMonsterGroup& Group) const;
+
+	void DrawMonsterGroupsDebug();
+
 	// Runs the scenario steps: while the current step's trigger is met (or it has none), runs its actions and
 	// moves on. At most one step per frame, so a chain of steps without triggers still reads in order in the log.
 	void TickSteps();
@@ -219,6 +257,10 @@ private:
 
 	// Heroes a step made untouchable (SetHeroUntouchable()).
 	TSet<FName> UntouchableHeroIds;
+
+	// Step 2.8: monster groups by name.
+	UPROPERTY(Transient)
+	TMap<FName, FPrologueMonsterGroup> MonsterGroups;
 
 	bool bStarted = false;
 	int32 StartAttempts = 0;

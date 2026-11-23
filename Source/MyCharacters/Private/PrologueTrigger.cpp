@@ -187,6 +187,32 @@ FString UPrologueTrigger_NoMonstersNear::DescribeCondition() const
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Monsters of a group near hero
+
+bool UPrologueTrigger_MonsterGroupNear::Check(const APrologueDirector& Director) const
+{
+	const ABaseCharacter* Hero = Director.ResolveHero(HeroId);
+	if (!IsValid(Hero))
+	{
+		return false;
+	}
+	int32 Near = 0;
+	for (const ABaseMonster* Monster : Director.GetMonsterGroup(GroupName))
+	{
+		if (FVector::Dist2D(Monster->GetActorLocation(), Hero->GetActorLocation()) <= Radius)
+		{
+			++Near;
+		}
+	}
+	return Near >= MinCount;
+}
+
+FString UPrologueTrigger_MonsterGroupNear::DescribeCondition() const
+{
+	return FString::Printf(TEXT("%d+ of group '%s' within %.1f m of %s"), MinCount, *GroupName.ToString(), Radius / 100.0f, *HeroName(HeroId));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // All of / Any of
 
 bool UPrologueTrigger_AllOf::Check(const APrologueDirector& Director) const
