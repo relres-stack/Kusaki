@@ -90,7 +90,17 @@ Source/MyCharacters/
     IntroSceneDirector.cpp
 
 Content/
-  BP_Redneck                             — Blueprint наследник ARedneckCharacter
+  Characters/BP_Redneck                  — Blueprint наследник ARedneckCharacter, единственный (меш
+                                           RN2/SKM_Redneck, AnimBP RN2/Anim/ABP_Unarmed_Redneck).
+                                           22.11.2026: прежний BP на манекене удалён, этот перенесён
+                                           сюда из Characters/RN2. Камера и ввод —
+                                           только из C++ (лишние SpringArm/Camera и шаблонный
+                                           Enhanced Input из Blueprint убраны).
+                                           Анимации Реднеку — только перенацеленные `*_Redneck` из
+                                           RN2/Anim (скелет SK_Redneck, пропорции не манекена):
+                                           падение (KnockdownFallAnimation) = MM_Death_Front_01_Redneck
+                                           (C++ по умолчанию ставит манекенную MM_Death_Front_01,
+                                           она проигрывается по именам костей, но с чужими пропорциями)
   RoadToDawn/Lvl_RoadToDawn_Terrain      — уровень с актором RTD_IntroScene (вступительная сцена)
 
 ForImport/RoadToDawn/                    — генератор и расстановка уровня (README_RoadToDawn.txt)
