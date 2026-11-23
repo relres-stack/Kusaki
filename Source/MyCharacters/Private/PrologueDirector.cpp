@@ -6,6 +6,7 @@
 #include "BaseCharacter.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/HeroScriptRunner.h"
+#include "Components/ScriptedKnockdownComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -197,6 +198,23 @@ UHeroScriptRunner* APrologueDirector::GetOrAddScriptRunner(ABaseCharacter* Hero)
 	Runner->RegisterComponent();
 	Hero->AddInstanceComponent(Runner);
 	return Runner;
+}
+
+UScriptedKnockdownComponent* APrologueDirector::GetOrAddKnockdown(ABaseCharacter* Hero)
+{
+	if (!IsValid(Hero))
+	{
+		return nullptr;
+	}
+	if (UScriptedKnockdownComponent* Existing = Hero->FindComponentByClass<UScriptedKnockdownComponent>())
+	{
+		return Existing;
+	}
+	// Added at runtime, not in ABaseCharacter's constructor (rule 1), like the script runner.
+	UScriptedKnockdownComponent* Knockdown = NewObject<UScriptedKnockdownComponent>(Hero, TEXT("ScriptedKnockdown"));
+	Knockdown->RegisterComponent();
+	Hero->AddInstanceComponent(Knockdown);
+	return Knockdown;
 }
 
 void APrologueDirector::HandleHeroScriptFinished(UHeroScriptRunner* Runner, bool bInterrupted)
@@ -724,7 +742,10 @@ void APrologueDirector::TickDebug()
 		{
 			const ABaseCharacter* Hero = GetHero(Entry.HeroId);
 			const TCHAR* HeroState = !IsValid(Hero) ? TEXT("absent") : (Entry.HeroId == Controlled ? TEXT("PLAYER") : TEXT("AI"));
-			Line += FString::Printf(TEXT(" %s=%s"), *Entry.HeroId.ToString(), HeroState);
+			// Scripted fall (step 2.6): "Priest=PLAYER(lying)".
+			const UScriptedKnockdownComponent* Knockdown = IsValid(Hero) ? Hero->FindComponentByClass<UScriptedKnockdownComponent>() : nullptr;
+			const FString Down = IsValid(Knockdown) && Knockdown->IsDown() ? FString::Printf(TEXT("(%s)"), *Knockdown->DescribeState()) : FString();
+			Line += FString::Printf(TEXT(" %s=%s%s"), *Entry.HeroId.ToString(), HeroState, *Down);
 		}
 		if (bDebugSwitchKey)
 		{

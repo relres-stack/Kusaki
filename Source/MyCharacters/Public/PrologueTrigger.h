@@ -89,6 +89,8 @@ enum class EPrologueHeroState : uint8
 	FingerFlame			UMETA(DisplayName = "Finger flame on (Priest)"),
 	InflamedVision		UMETA(DisplayName = "Inflamed vision on (Priest)"),
 	Dead				UMETA(DisplayName = "Dead"),
+	// Scripted fall (step 2.6): lying, or still getting up. Inverted = he is fully on his feet again.
+	KnockedDown			UMETA(DisplayName = "Lying after a scripted fall (or getting up)"),
 };
 
 // The hero is in a state right now (read from the hero, nothing is changed on him).

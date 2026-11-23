@@ -7,6 +7,7 @@
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 #include "FingerFlamePeekComponent.h"
+#include "Components/ScriptedKnockdownComponent.h"
 #include "Components/HeroScriptRunner.h"
 #include "Components/VisionFireSourceComponent.h"
 #include "HeroScriptCommand.h"
@@ -126,6 +127,11 @@ bool UPrologueTrigger_HeroState::Check(const APrologueDirector& Director) const
 	}
 	case EPrologueHeroState::Dead:
 		return Hero->bIsDead;
+	case EPrologueHeroState::KnockedDown:
+	{
+		const UScriptedKnockdownComponent* Knockdown = Hero->FindComponentByClass<UScriptedKnockdownComponent>();
+		return IsValid(Knockdown) && Knockdown->IsDown();
+	}
 	}
 	return false;
 }

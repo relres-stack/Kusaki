@@ -8,6 +8,7 @@
 #include "PrologueAction.generated.h"
 
 class APrologueDirector;
+class UAnimSequence;
 
 // "What happens" when a prologue step fires (task 04): one thing the director does, picked from a drop-down in
 // the scenario asset. Steps run their actions in order, all at once. Like UPrologueTrigger, actions live in the
@@ -90,6 +91,36 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Action")
 	FHeroScript Script;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
+// Scripted fall (step 2.6): the hero falls without damage or panic and lies until a later step makes him get up
+// (UScriptedKnockdownComponent). Works for the player's hero too: he cannot walk, but can look around and use his
+// abilities (step 11: the Priest lies and turns on his inflamed vision).
+UCLASS(meta = (DisplayName = "Knock hero down / get up"))
+class MYCHARACTERS_API UPrologueAction_KnockDown : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	// Who. Empty = the hero the player controls.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName HeroId;
+
+	// Off: he falls. On: he gets up.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bGetUp = false;
+
+	// Fall or get-up animation, only for this moment (its last frame is the lying pose). Empty = the hero's own
+	// KnockdownFallAnimation / GetUpAnimation.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	TObjectPtr<UAnimSequence> Animation;
+
+	// When he falls, his own script stops (he cannot walk lying). Give him a new one for lines while lying.
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (EditCondition = "!bGetUp"))
+	bool bStopHisScript = true;
 
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;

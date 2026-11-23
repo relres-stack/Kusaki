@@ -85,6 +85,10 @@ public:
 	// UHeroScriptCommand_Hide: hides the hero with everything he holds, or shows him again.
 	void SetHeroHidden(bool bHidden);
 
+	// The hero lies after a scripted fall or is still getting up (UScriptedKnockdownComponent, step 2.6): commands
+	// that need him on his feet (UHeroScriptCommand::CanRunWhileDown() false) are skipped meanwhile.
+	bool IsHeroDown() const;
+
 protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
@@ -116,5 +120,8 @@ private:
 	int32 SubtitleKey = -1;
 
 	bool bHiddenByScript = false;
+
+	// A command skipped while the hero lies is logged once per fall, not every frame (a looping script of walks).
+	bool bSkipWhileDownLogged = false;
 	TArray<TWeakObjectPtr<AActor>> HiddenAttachedActors;
 };

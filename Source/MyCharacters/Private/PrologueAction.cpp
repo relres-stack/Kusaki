@@ -2,8 +2,10 @@
 
 #include "PrologueAction.h"
 
+#include "Animation/AnimSequence.h"
 #include "BaseCharacter.h"
 #include "Components/HeroScriptRunner.h"
+#include "Components/ScriptedKnockdownComponent.h"
 #include "Engine/Engine.h"
 #include "PrologueDirector.h"
 
@@ -66,4 +68,35 @@ FString UPrologueAction_HeroScript::Describe() const
 		return FString::Printf(TEXT("%s stops his script"), *Who);
 	}
 	return FString::Printf(TEXT("%s script: %d command(s)%s"), *Who, Script.Commands.Num(), Script.bLoop ? TEXT(", looping") : TEXT(""));
+}
+
+void UPrologueAction_KnockDown::Execute(APrologueDirector& Director) const
+{
+	ABaseCharacter* Hero = Director.ResolveHero(HeroId);
+	UScriptedKnockdownComponent* Knockdown = IsValid(Hero) ? Director.GetOrAddKnockdown(Hero) : nullptr;
+	if (!IsValid(Knockdown))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: hero '%s' is not in the level - knock down / get up skipped"), *HeroId.ToString());
+		return;
+	}
+	if (bGetUp)
+	{
+		Knockdown->GetUp(Animation);
+		return;
+	}
+	if (bStopHisScript)
+	{
+		if (UHeroScriptRunner* Runner = Hero->FindComponentByClass<UHeroScriptRunner>())
+		{
+			Runner->StopScript();
+		}
+	}
+	Knockdown->KnockDown(Animation);
+}
+
+FString UPrologueAction_KnockDown::Describe() const
+{
+	const FString Who = HeroId.IsNone() ? FString(TEXT("player's hero")) : HeroId.ToString();
+	return FString::Printf(TEXT("%s %s%s"), *Who, bGetUp ? TEXT("gets up") : TEXT("is knocked down"),
+		Animation ? *FString::Printf(TEXT(" (%s)"), *Animation->GetName()) : TEXT(""));
 }

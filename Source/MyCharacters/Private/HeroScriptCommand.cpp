@@ -5,9 +5,11 @@
 #include "AIController.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimSequence.h"
 #include "BaseCharacter.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/HeroScriptRunner.h"
+#include "Components/ScriptedKnockdownComponent.h"
 #include "Engine/Engine.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HeroScriptNavFilter.h"
@@ -16,6 +18,7 @@
 #include "Navigation/PathFollowingComponent.h"
 #include "NavigationData.h"
 #include "NavigationSystem.h"
+#include "PrologueDirector.h"
 #include "Sound/SoundBase.h"
 
 namespace
@@ -613,4 +616,44 @@ FString UHeroScriptCommand_CallFunction::Describe() const
 	return Component
 		? FString::Printf(TEXT("use %s.%s"), *Component->GetName(), *FunctionName.ToString())
 		: FString::Printf(TEXT("use %s"), *FunctionName.ToString());
+}
+
+void UHeroScriptCommand_KnockDown::Start(UHeroScriptRunner& Runner)
+{
+	ABaseCharacter* Hero = Runner.GetHero();
+	APrologueDirector* Director = Runner.GetDirector();
+	UScriptedKnockdownComponent* Knockdown = IsValid(Director) ? Director->GetOrAddKnockdown(Hero) : nullptr;
+	if (!IsValid(Knockdown))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s cannot fall or get up - no director"), *Runner.GetHeroName());
+		return;
+	}
+	if (bGetUp)
+	{
+		bStarted = Knockdown->GetUp(Animation);
+		return;
+	}
+	bStarted = Knockdown->KnockDown(Animation);
+	FallEndTime = Runner.GetWorldTime() + Knockdown->GetFallDuration();
+}
+
+EHeroScriptCommandStatus UHeroScriptCommand_KnockDown::Tick(UHeroScriptRunner& Runner, float DeltaSeconds)
+{
+	if (!bStarted || !bWaitForAnimation)
+	{
+		return EHeroScriptCommandStatus::Done;
+	}
+	if (bGetUp)
+	{
+		const ABaseCharacter* Hero = Runner.GetHero();
+		const UScriptedKnockdownComponent* Knockdown = IsValid(Hero) ? Hero->FindComponentByClass<UScriptedKnockdownComponent>() : nullptr;
+		return IsValid(Knockdown) && Knockdown->IsDown() ? EHeroScriptCommandStatus::Running : EHeroScriptCommandStatus::Done;
+	}
+	return Runner.GetWorldTime() < FallEndTime ? EHeroScriptCommandStatus::Running : EHeroScriptCommandStatus::Done;
+}
+
+FString UHeroScriptCommand_KnockDown::Describe() const
+{
+	return FString::Printf(TEXT("%s%s"), bGetUp ? TEXT("get up") : TEXT("fall down"),
+		Animation ? *FString::Printf(TEXT(" (%s)"), *Animation->GetName()) : TEXT(""));
 }

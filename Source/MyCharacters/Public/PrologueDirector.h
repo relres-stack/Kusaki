@@ -13,6 +13,7 @@ class AIntroSceneDirector;
 class APlayerController;
 class UHeroScriptRunner;
 class UPrologueScenarioData;
+class UScriptedKnockdownComponent;
 struct FPrologueAppearancePlacement;
 struct FPrologueHeroEntry;
 
@@ -145,6 +146,10 @@ public:
 	// The hero's script runner (step 2.5), added to him the first time the scenario gives him something to do.
 	UFUNCTION(BlueprintCallable, Category = "Prologue")
 	UHeroScriptRunner* GetOrAddScriptRunner(ABaseCharacter* Hero);
+
+	// The hero's scripted fall (step 2.6), added to him the first time the scenario knocks him down.
+	UFUNCTION(BlueprintCallable, Category = "Prologue")
+	UScriptedKnockdownComponent* GetOrAddKnockdown(ABaseCharacter* Hero);
 
 	// Fired after control has passed to another hero.
 	UPROPERTY(BlueprintAssignable, Category = "Prologue")

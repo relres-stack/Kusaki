@@ -5,6 +5,7 @@
 #include "AIController.h"
 #include "BaseCharacter.h"
 #include "BaseMonster.h"
+#include "Components/ScriptedKnockdownComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -134,12 +135,29 @@ void UHeroScriptRunner::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s's script goes on (command %d again from its start)"), *GetHeroName(), CommandIndex + 1);
 	}
 
+	if (bSkipWhileDownLogged && !IsHeroDown())
+	{
+		bSkipWhileDownLogged = false;
+	}
 	if (!bCommandStarted)
 	{
 		StartCurrentCommand();
 	}
 
-	const EHeroScriptCommandStatus Status = IsValid(Current) ? Current->Tick(*this, DeltaTime) : EHeroScriptCommandStatus::Done;
+	EHeroScriptCommandStatus Status = EHeroScriptCommandStatus::Done;
+	if (IsValid(Current))
+	{
+		if (!Current->CanRunWhileDown() && IsHeroDown())
+		{
+			// Knocked down in the middle of a walk or a turn: that command is over, the script goes on.
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: %s lies (scripted fall) - '%s' cut short"), *GetHeroName(), *Current->Describe());
+			EndCurrentCommand(true);
+		}
+		else
+		{
+			Status = Current->Tick(*this, DeltaTime);
+		}
+	}
 	if (Status != EHeroScriptCommandStatus::Done)
 	{
 		return;
@@ -174,6 +192,17 @@ void UHeroScriptRunner::StartCurrentCommand()
 	// A fresh copy each time: commands keep their runtime state in members, the asset stays untouched.
 	Current = DuplicateObject<UHeroScriptCommand>(Script[CommandIndex], this);
 	UE_LOG(LogTemp, Warning, TEXT("Prologue: %s %d/%d: %s"), *GetHeroName(), CommandIndex + 1, Script.Num(), *Current->Describe());
+	if (!Current->CanRunWhileDown() && IsHeroDown())
+	{
+		// He cannot walk or turn lying: skip it (the next frame moves on), the scene does not wait for nothing.
+		if (!bSkipWhileDownLogged)
+		{
+			bSkipWhileDownLogged = true;
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: %s lies (scripted fall) - '%s' skipped (walks and turns are skipped until he is up)"), *GetHeroName(), *Current->Describe());
+		}
+		Current = nullptr;
+		return;
+	}
 	Current->Start(*this);
 }
 
@@ -350,4 +379,11 @@ void UHeroScriptRunner::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		EndCurrentCommand(true);
 	}
 	Super::EndPlay(EndPlayReason);
+}
+
+bool UHeroScriptRunner::IsHeroDown() const
+{
+	const ABaseCharacter* Hero = GetHero();
+	const UScriptedKnockdownComponent* Knockdown = IsValid(Hero) ? Hero->FindComponentByClass<UScriptedKnockdownComponent>() : nullptr;
+	return IsValid(Knockdown) && Knockdown->IsDown();
 }

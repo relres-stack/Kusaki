@@ -7,6 +7,7 @@
 #include "HeroScriptCommand.generated.h"
 
 class UAnimMontage;
+class UAnimSequence;
 class UHeroScriptRunner;
 class USoundBase;
 struct FAIRequestID;
@@ -83,6 +84,11 @@ public:
 
 	// Draws what the running command is doing for one frame (a move draws its path). Nothing by default.
 	virtual void DrawDebug(const UHeroScriptRunner& Runner) const {}
+
+	// False for commands that need the hero on his feet (walking, turning): while he lies after a scripted fall
+	// (UScriptedKnockdownComponent, step 2.6) the runner skips them with a warning. True by default (lines, waits,
+	// abilities, getting up).
+	virtual bool CanRunWhileDown() const { return true; }
 };
 
 // A list of commands for one hero.
@@ -145,6 +151,7 @@ public:
 	virtual FString Describe() const override;
 	virtual FString DescribeProgress(const UHeroScriptRunner& Runner) const override;
 	virtual void DrawDebug(const UHeroScriptRunner& Runner) const override;
+	virtual bool CanRunWhileDown() const override { return false; }
 
 private:
 	void RequestMove(UHeroScriptRunner& Runner);
@@ -184,6 +191,7 @@ public:
 	virtual void Start(UHeroScriptRunner& Runner) override;
 	virtual EHeroScriptCommandStatus Tick(UHeroScriptRunner& Runner, float DeltaSeconds) override;
 	virtual FString Describe() const override;
+	virtual bool CanRunWhileDown() const override { return false; }
 
 private:
 	double StartTime = 0.0;
@@ -322,4 +330,35 @@ public:
 
 	virtual void Start(UHeroScriptRunner& Runner) override;
 	virtual FString Describe() const override;
+};
+
+// The hero falls (no damage, no panic) or gets up again: the same scripted fall as the "Knock hero down / get up"
+// action (UScriptedKnockdownComponent, step 2.6), as a part of his own script — "runs, trips and falls". While he
+// lies, "Move to" and "Turn to" are skipped; lines, waits and abilities still work.
+UCLASS(meta = (DisplayName = "Fall down / get up"))
+class MYCHARACTERS_API UHeroScriptCommand_KnockDown : public UHeroScriptCommand
+{
+	GENERATED_BODY()
+
+public:
+	// Off: he falls. On: he gets up.
+	UPROPERTY(EditAnywhere, Category = "Command")
+	bool bGetUp = false;
+
+	// Fall or get-up animation, only for this moment (the fall's last frame is the lying pose). Empty = the hero's
+	// own KnockdownFallAnimation / GetUpAnimation.
+	UPROPERTY(EditAnywhere, Category = "Command")
+	TObjectPtr<UAnimSequence> Animation;
+
+	// On: the next command waits until the fall animation is over / until he is on his feet.
+	UPROPERTY(EditAnywhere, Category = "Command")
+	bool bWaitForAnimation = true;
+
+	virtual void Start(UHeroScriptRunner& Runner) override;
+	virtual EHeroScriptCommandStatus Tick(UHeroScriptRunner& Runner, float DeltaSeconds) override;
+	virtual FString Describe() const override;
+
+private:
+	bool bStarted = false;
+	double FallEndTime = 0.0;
 };
