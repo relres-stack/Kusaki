@@ -633,7 +633,7 @@ void UHeroScriptCommand_KnockDown::Start(UHeroScriptRunner& Runner)
 		bStarted = Knockdown->GetUp(Animation);
 		return;
 	}
-	bStarted = Knockdown->KnockDown(Animation);
+	bStarted = Knockdown->KnockDown(Animation, bUntouchableWhileDown);
 	FallEndTime = Runner.GetWorldTime() + Knockdown->GetFallDuration();
 }
 

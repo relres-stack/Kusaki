@@ -48,8 +48,10 @@ public:
 	// The hero falls: FallAnimation plays once and its last frame holds while he lies. Null = the hero's own
 	// KnockdownFallAnimation (the panic fall). If he is in the air he lands first. Already lying = nothing happens.
 	// Returns false (and logs why) when he cannot fall: dead, or riding a monster (dismount him first).
+	// bUntouchableWhileDown: monsters cannot harm him until he is fully up again (step 2.7) — APrologueDirector reads
+	// IsUntouchableWhileDown() and sets the hero's flag; this component does not touch it itself.
 	UFUNCTION(BlueprintCallable, Category = "Scripted Knockdown")
-	bool KnockDown(UAnimSequence* FallAnimation = nullptr);
+	bool KnockDown(UAnimSequence* FallAnimation = nullptr, bool bUntouchableWhileDown = true);
 
 	// The hero stands up: GetUpAnimation plays once (null = the hero's own GetUpAnimation; none at all = he is up at
 	// once), then walking and the AnimBP come back. Returns false if he is not lying.
@@ -62,6 +64,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Scripted Knockdown")
 	EScriptedKnockdownState GetState() const { return State; }
+
+	// Down (lying or getting up) after a fall that asked for protection (KnockDown()'s bUntouchableWhileDown).
+	UFUNCTION(BlueprintPure, Category = "Scripted Knockdown")
+	bool IsUntouchableWhileDown() const { return IsDown() && bDownIsUntouchable; }
 
 	// Seconds the fall animation takes (0 if there is none): a script command waits this long for the fall to end.
 	float GetFallDuration() const;
@@ -83,6 +89,8 @@ private:
 	void Notify(const FString& Message, const FColor& Color) const;
 
 	EScriptedKnockdownState State = EScriptedKnockdownState::Standing;
+
+	bool bDownIsUntouchable = true;
 
 	// The animation whose last frame is the lying pose (null = none was found: he only stops, still standing).
 	UPROPERTY(Transient)

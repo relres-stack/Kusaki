@@ -122,6 +122,32 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Action", meta = (EditCondition = "!bGetUp"))
 	bool bStopHisScript = true;
 
+	// Monsters cannot harm him (no damage, panic, kill or touch) until he is fully up again (step 2.7) — the Priest
+	// lying in the crowd. Off = ordinary rules for the player's hero while he lies (a hero under AI is protected anyway).
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (EditCondition = "!bGetUp"))
+	bool bUntouchableWhileDown = true;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
+// Monsters cannot harm this hero (step 2.7): no damage, panic, kill or touch, they do not even swing at him; they still
+// see, chase and surround him. For scenes and other moments of the player's hero; heroes the player does not control
+// are protected anyway. Stays until a later step turns it off (also across control switches).
+UCLASS(meta = (DisplayName = "Hero untouchable by monsters on/off"))
+class MYCHARACTERS_API UPrologueAction_HeroUntouchable : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	// Who. Empty = the hero the player controls at the moment the step fires.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName HeroId;
+
+	// On: protected from now on. Off: ordinary rules again (unless he is under AI or lying after a protected fall).
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bUntouchable = true;
+
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;
 };

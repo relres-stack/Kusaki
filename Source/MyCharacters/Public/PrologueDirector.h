@@ -151,6 +151,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Prologue")
 	UScriptedKnockdownComponent* GetOrAddKnockdown(ABaseCharacter* Hero);
 
+	// Step 2.7: monsters cannot harm hero HeroId (no damage, panic, kill or touch) until this is called again with
+	// false. Heroes under AI are protected regardless; this is for the player's hero (scenes, special moments).
+	UFUNCTION(BlueprintCallable, Category = "Prologue")
+	void SetHeroUntouchable(FName HeroId, bool bUntouchable);
+
 	// Fired after control has passed to another hero.
 	UPROPERTY(BlueprintAssignable, Category = "Prologue")
 	FOnPrologueHeroSwitched OnHeroSwitched;
@@ -176,15 +181,20 @@ private:
 
 	AAIController* GetOrCreateAIController(ABaseCharacter* Hero, FName HeroId);
 
-	// The hero goes on under its AI: possessed by its AAIController, aiming suppressed. Monster damage/panic
-	// immunity is deliberately NOT set here: an AI hero is already out of the monsters' reach (they only target
-	// GetPlayerCharacter(0), and ABaseMonster::OnCapsuleHit() ignores every other hero), and the immunity flag is
-	// shared with Moonshine (UMoonshineComponent turns it on and off during the buff), so touching it here would
-	// fight that mechanic. Short immunity windows for the player's hero during scenes come with stage 3.
+	// The hero goes on under its AI: possessed by its AAIController, aiming suppressed, untouchable by monsters
+	// (UpdateHeroProtection()). Moonshine's SetImmuneToMonsterAttacks() is deliberately not used: that flag belongs
+	// to UMoonshineComponent, which turns it off itself when the buff ends.
 	void PutUnderAI(ABaseCharacter* Hero, FName HeroId);
 
-	// The player takes the hero: aiming allowed again.
+	// The player takes the hero: aiming allowed again, protection recomputed (UpdateHeroProtection()).
 	void ReleaseFromAI(ABaseCharacter* Hero);
+
+	// Step 2.7: ABaseCharacter::SetUntouchableByMonsters() for a hero = he is under AI, or lies after a scripted fall
+	// that asked for it (UScriptedKnockdownComponent::IsUntouchableWhileDown()), or a step made him untouchable
+	// (UntouchableHeroIds). The director owns this flag on the prologue's heroes: it is recomputed every frame and
+	// written only when it changes.
+	void UpdateHeroProtection(ABaseCharacter* Hero, FName HeroId);
+	void UpdateAllHeroProtection();
 
 	// Runs the scenario steps: while the current step's trigger is met (or it has none), runs its actions and
 	// moves on. At most one step per frame, so a chain of steps without triggers still reads in order in the log.
@@ -206,6 +216,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<AIntroSceneDirector> Intro;
+
+	// Heroes a step made untouchable (SetHeroUntouchable()).
+	TSet<FName> UntouchableHeroIds;
 
 	bool bStarted = false;
 	int32 StartAttempts = 0;

@@ -1608,8 +1608,8 @@ float ABaseCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageE
 	// See SetImmuneToMonsterAttacks()'s own comment — every damage source in this project that currently
 	// reaches a player's TakeDamage() originates from a monster (ChaseAttackDamage, Naskok, PanicStrike,
 	// Eye Peek hit, etc.); no unrelated damage source (e.g. fall damage) exists yet, so this is a flat
-	// no-op rather than trying to filter by DamageCauser/EventInstigator.
-	if (bImmuneToMonsterAttacks)
+	// no-op rather than trying to filter by DamageCauser/EventInstigator. SetUntouchableByMonsters() — same no-op.
+	if (bImmuneToMonsterAttacks || bUntouchableByMonsters)
 	{
 		return 0.0f;
 	}
@@ -1831,7 +1831,7 @@ void ABaseCharacter::StopSprinting()
 
 void ABaseCharacter::EnterPanicState(ABaseMonster* AttackingMonster)
 {
-	if (bIsPanicking || bIsDead || bIsTrapped || bImmuneToMonsterAttacks || !IsValid(AttackingMonster))
+	if (bIsPanicking || bIsDead || bIsTrapped || bImmuneToMonsterAttacks || bUntouchableByMonsters || !IsValid(AttackingMonster))
 	{
 		return;
 	}

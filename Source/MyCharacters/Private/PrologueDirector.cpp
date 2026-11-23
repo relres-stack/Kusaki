@@ -663,6 +663,9 @@ void APrologueDirector::PutUnderAI(ABaseCharacter* Hero, FName HeroId)
 	// RMB-aiming is read straight from the key state by ABaseCharacter::Tick() only for the player's hero, but
 	// bIsAiming would keep its last value; suppressing it makes sure an AI hero never stays "aiming".
 	Hero->SetAimSuppressed(true);
+	// Protected right away, not on the next Tick: a swing a monster started at him while he was the player's
+	// hero may land this very frame.
+	UpdateHeroProtection(Hero, HeroId);
 }
 
 void APrologueDirector::ReleaseFromAI(ABaseCharacter* Hero)
@@ -670,6 +673,7 @@ void APrologueDirector::ReleaseFromAI(ABaseCharacter* Hero)
 	if (IsValid(Hero))
 	{
 		Hero->SetAimSuppressed(false);
+		UpdateHeroProtection(Hero, FindHeroId(Hero));
 	}
 }
 
@@ -677,7 +681,56 @@ void APrologueDirector::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	TickSteps();
+	UpdateAllHeroProtection();
 	TickDebug();
+}
+
+void APrologueDirector::SetHeroUntouchable(FName HeroId, bool bUntouchable)
+{
+	if (bUntouchable)
+	{
+		UntouchableHeroIds.Add(HeroId);
+	}
+	else
+	{
+		UntouchableHeroIds.Remove(HeroId);
+	}
+	UpdateHeroProtection(GetHero(HeroId), HeroId);
+}
+
+void APrologueDirector::UpdateAllHeroProtection()
+{
+	for (const TPair<FName, TObjectPtr<ABaseCharacter>>& Pair : Heroes)
+	{
+		UpdateHeroProtection(Pair.Value, Pair.Key);
+	}
+}
+
+void APrologueDirector::UpdateHeroProtection(ABaseCharacter* Hero, FName HeroId)
+{
+	if (!IsValid(Hero) || Hero->bIsDead)
+	{
+		return;
+	}
+
+	// Decision 3: a hero the player does not control cannot be knocked down or killed by monsters — only by the
+	// scenario. Besides, the player's hero while he lies after a protected scripted fall, and whoever a step made
+	// untouchable ("Hero untouchable by monsters on/off").
+	const UScriptedKnockdownComponent* Knockdown = Hero->FindComponentByClass<UScriptedKnockdownComponent>();
+	const bool bUnderAI = !Hero->IsPlayerControlled();
+	const bool bLying = IsValid(Knockdown) && Knockdown->IsUntouchableWhileDown();
+	const bool bByStep = UntouchableHeroIds.Contains(HeroId);
+	const bool bWanted = bUnderAI || bLying || bByStep;
+	if (Hero->IsUntouchableByMonsters() == bWanted)
+	{
+		return;
+	}
+
+	Hero->SetUntouchableByMonsters(bWanted);
+	const FString Why = !bWanted ? FString(TEXT("monsters can hit him again"))
+		: FString::Printf(TEXT("untouchable by monsters (%s)"), bUnderAI ? TEXT("under AI") : (bLying ? TEXT("lying after a scripted fall") : TEXT("scenario step")));
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: %s - %s"), *HeroId.ToString(), *Why);
+	ShowDebug(609, 4.0f, bWanted ? FColor::Green : FColor::Orange, FString::Printf(TEXT("Prologue: %s - %s"), *HeroId.ToString(), *Why));
 }
 
 void APrologueDirector::TickDebug()
@@ -745,7 +798,9 @@ void APrologueDirector::TickDebug()
 			// Scripted fall (step 2.6): "Priest=PLAYER(lying)".
 			const UScriptedKnockdownComponent* Knockdown = IsValid(Hero) ? Hero->FindComponentByClass<UScriptedKnockdownComponent>() : nullptr;
 			const FString Down = IsValid(Knockdown) && Knockdown->IsDown() ? FString::Printf(TEXT("(%s)"), *Knockdown->DescribeState()) : FString();
-			Line += FString::Printf(TEXT(" %s=%s%s"), *Entry.HeroId.ToString(), HeroState, *Down);
+			// Step 2.7: "[safe]" = monsters cannot harm him right now.
+			const TCHAR* Safe = IsValid(Hero) && Hero->IsUntouchableByMonsters() ? TEXT("[safe]") : TEXT("");
+			Line += FString::Printf(TEXT(" %s=%s%s%s"), *Entry.HeroId.ToString(), HeroState, *Down, Safe);
 		}
 		if (bDebugSwitchKey)
 		{

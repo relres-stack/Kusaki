@@ -594,7 +594,9 @@ void ABaseMonster::CheckForPlayer()
 	// down and immobile for the Nose-Breathing mini-game's whole duration while bIsPanicking is true (the
 	// entry condition this whole block requires), so GetActorLocation() IS the fixed point, not a moving
 	// target that needs re-tracking every poll.
-	if (IsValid(Player) && Player->PanicEpisodeId > 0
+	// !IsUntouchableByMonsters(): no pile-on swings at a hero the scenario protects (ABaseCharacter::
+	// SetUntouchableByMonsters()); he falls through to the ordinary detection below like anyone else.
+	if (IsValid(Player) && Player->PanicEpisodeId > 0 && !Player->IsUntouchableByMonsters()
 		&& (bIsInvestigatingAlert || State == EMonsterState::Chase)
 		&& GetWorld()->GetTimeSeconds() >= PanicStrikeEligibleTime
 		&& !PendingPanicStrikeTarget.IsValid()
@@ -645,7 +647,10 @@ void ABaseMonster::CheckForPlayer()
 	// reaction-matrix resolution (Fatality/Panic+Alert/Dodge depending on the player's state once the
 	// monster's blind swing actually lands). Deliberately does NOT return here — IsPlayerVisible() below
 	// will reject this same closed-eyed player anyway, so falling through is harmless.
-	if (IsValid(Player) && Player->IsEyesClosed() && Player->GetIsAiming() && IsPlayerWithinSightCone(Player))
+	// !IsUntouchableByMonsters(): no Eye Peek swing at a hero the scenario protects (ABaseCharacter::
+	// SetUntouchableByMonsters()).
+	if (IsValid(Player) && Player->IsEyesClosed() && Player->GetIsAiming() && !Player->IsUntouchableByMonsters()
+		&& IsPlayerWithinSightCone(Player))
 	{
 		TryTriggerEyePeekEncounter(Player);
 	}
@@ -758,6 +763,14 @@ void ABaseMonster::CheckForPlayer()
 			// OnOwnerCapsuleHit(), which stuns+knocks back THIS monster instead. Deliberately no state
 			// change here (stays in Chase) — a monster whose ram gets dodged keeps pursuing normally.
 			if (Player->IsImmuneToMonsterCatch())
+			{
+				return;
+			}
+
+			// ABaseCharacter::SetUntouchableByMonsters() (prologue): no swing at all — the monster stays in Chase
+			// right next to him (follows again once he moves away), instead of a harmless swing restarted every
+			// poll.
+			if (Player->IsUntouchableByMonsters())
 			{
 				return;
 			}
@@ -1627,6 +1640,16 @@ void ABaseMonster::PlayAttackAnimation()
 
 void ABaseMonster::OnKillPlayer(ABaseCharacter* Player)
 {
+	// ABaseCharacter::SetUntouchableByMonsters() (prologue, task 04 step 2.7): no kill. Checked before
+	// bHasCaughtPlayer is set, so this monster is not left "has caught" and goes on as before. Every instant kill
+	// (Eye Peek, open-eyes pile-on, Blind Encounter) ends up here; the swing animation the caller already started
+	// simply plays without effect.
+	if (IsValid(Player) && Player->IsUntouchableByMonsters())
+	{
+		UE_LOG(LogTemp, Log, TEXT("%s: kill on %s skipped - untouchable by monsters (scenario)"), *GetName(), *Player->GetName());
+		return;
+	}
+
 	// See bHasCaughtPlayer's own comment — without this, CheckForPlayer()'s ~0.1s poll would keep
 	// re-entering this function for as long as the (now-stationary) ragdolled Player stays within
 	// CatchDistance, which is effectively forever.
@@ -1979,8 +2002,9 @@ void ABaseMonster::OnCapsuleHit(UPrimitiveComponent* HitComp, AActor* OtherActor
 		return;
 	}
 
-	// A monster driven by a scene does not start encounters by itself either (SetScriptControlled()).
-	if (bIsScriptControlled)
+	// A monster driven by a scene does not start encounters by itself either (SetScriptControlled()), and a touch
+	// on a hero the scenario protects does not count (ABaseCharacter::SetUntouchableByMonsters()).
+	if (bIsScriptControlled || Player->IsUntouchableByMonsters())
 	{
 		return;
 	}
@@ -2851,7 +2875,10 @@ void ABaseMonster::OnAttackHitNotify()
 void ABaseMonster::ResolveBlindEncounterReaction(TWeakObjectPtr<ABaseCharacter> WeakPlayer)
 {
 	ABaseCharacter* Player = WeakPlayer.Get();
-	if (!IsValid(Player) || Player->bIsDead || !Player->IsEyesClosed())
+	// IsUntouchableByMonsters(): the touch happened just before the scenario protected him (e.g. control passed
+	// to another hero within BlindTouchReactionDelay). Scenario B would clear ScanTimerHandle and then have its
+	// EnterPanicState() refused — leaving this monster Scanning forever — so it is torn down like "gone" instead.
+	if (!IsValid(Player) || Player->bIsDead || !Player->IsEyesClosed() || Player->IsUntouchableByMonsters())
 	{
 		// Player died, opened their eyes (already resolved via OpenEyes()'s own instant-kill check), or is
 		// otherwise gone — Scanning already started in OnCapsuleHit() above, so tear it down the same way

@@ -354,6 +354,11 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Command")
 	bool bWaitForAnimation = true;
 
+	// Monsters cannot harm him until he is fully up again (step 2.7) — matters if the player takes him over while he
+	// lies; under AI he is protected anyway.
+	UPROPERTY(EditAnywhere, Category = "Command", meta = (EditCondition = "!bGetUp"))
+	bool bUntouchableWhileDown = true;
+
 	virtual void Start(UHeroScriptRunner& Runner) override;
 	virtual EHeroScriptCommandStatus Tick(UHeroScriptRunner& Runner, float DeltaSeconds) override;
 	virtual FString Describe() const override;

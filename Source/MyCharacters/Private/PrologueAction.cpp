@@ -91,12 +91,31 @@ void UPrologueAction_KnockDown::Execute(APrologueDirector& Director) const
 			Runner->StopScript();
 		}
 	}
-	Knockdown->KnockDown(Animation);
+	Knockdown->KnockDown(Animation, bUntouchableWhileDown);
 }
 
 FString UPrologueAction_KnockDown::Describe() const
 {
 	const FString Who = HeroId.IsNone() ? FString(TEXT("player's hero")) : HeroId.ToString();
-	return FString::Printf(TEXT("%s %s%s"), *Who, bGetUp ? TEXT("gets up") : TEXT("is knocked down"),
-		Animation ? *FString::Printf(TEXT(" (%s)"), *Animation->GetName()) : TEXT(""));
+	return FString::Printf(TEXT("%s %s%s%s"), *Who, bGetUp ? TEXT("gets up") : TEXT("is knocked down"),
+		Animation ? *FString::Printf(TEXT(" (%s)"), *Animation->GetName()) : TEXT(""),
+		!bGetUp && !bUntouchableWhileDown ? TEXT(", monsters can hit him") : TEXT(""));
+}
+
+void UPrologueAction_HeroUntouchable::Execute(APrologueDirector& Director) const
+{
+	const ABaseCharacter* Hero = Director.ResolveHero(HeroId);
+	const FName Id = HeroId.IsNone() ? Director.GetControlledHeroId() : HeroId;
+	if (!IsValid(Hero) || Id.IsNone())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: hero '%s' is not in the level - untouchable on/off skipped"), *HeroId.ToString());
+		return;
+	}
+	Director.SetHeroUntouchable(Id, bUntouchable);
+}
+
+FString UPrologueAction_HeroUntouchable::Describe() const
+{
+	const FString Who = HeroId.IsNone() ? FString(TEXT("player's hero")) : HeroId.ToString();
+	return FString::Printf(TEXT("%s %s"), *Who, bUntouchable ? TEXT("untouchable by monsters") : TEXT("can be hit by monsters again"));
 }

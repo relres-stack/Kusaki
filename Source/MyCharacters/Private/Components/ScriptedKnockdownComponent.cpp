@@ -22,7 +22,7 @@ ABaseCharacter* UScriptedKnockdownComponent::GetHero() const
 	return Cast<ABaseCharacter>(GetOwner());
 }
 
-bool UScriptedKnockdownComponent::KnockDown(UAnimSequence* FallAnimation)
+bool UScriptedKnockdownComponent::KnockDown(UAnimSequence* FallAnimation, bool bUntouchableWhileDown)
 {
 	ABaseCharacter* Hero = GetHero();
 	if (!IsValid(Hero) || Hero->bIsDead)
@@ -35,6 +35,8 @@ bool UScriptedKnockdownComponent::KnockDown(UAnimSequence* FallAnimation)
 		UE_LOG(LogTemp, Warning, TEXT("Scripted knockdown: %s rides a monster - dismount him first"), *GetNameSafe(Hero));
 		return false;
 	}
+	// The latest call decides the protection, also when he is already lying.
+	bDownIsUntouchable = bUntouchableWhileDown;
 	if (State == EScriptedKnockdownState::Lying)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Scripted knockdown: %s is already lying"), *GetNameSafe(Hero));

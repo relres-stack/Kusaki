@@ -131,6 +131,19 @@ public:
 
 	bool IsImmuneToMonsterAttacks() const { return bImmuneToMonsterAttacks; }
 
+	// "Monsters cannot harm this hero at all" — stronger than SetImmuneToMonsterAttacks() and independent of it
+	// (that flag belongs to Moonshine, which turns it off itself when the buff ends). While true: TakeDamage() and
+	// EnterPanicState() no-op (same guards as above), and ABaseMonster neither kills him (OnKillPlayer() — covers
+	// Eye Peek, the open-eyes pile-on and the Blind Encounter kill), nor counts a touch (OnCapsuleHit()), nor swings at
+	// him at catch range (CheckForPlayer()) — monsters still see, chase and surround him. Today only APrologueDirector
+	// sets it (task 04, step 2.7: heroes the player is not controlling, a hero lying after a scripted fall, scenes);
+	// same generic-flag convention as SetAimSuppressed(): the caller turns it on and off.
+	UFUNCTION(BlueprintCallable, Category = "Health")
+	void SetUntouchableByMonsters(bool bUntouchable) { bUntouchableByMonsters = bUntouchable; }
+
+	UFUNCTION(BlueprintPure, Category = "Health")
+	bool IsUntouchableByMonsters() const { return bUntouchableByMonsters; }
+
 	// Generic "no aiming right now" switch for outside callers (today: AIntroSceneDirector, the opening
 	// scene). While true, Tick() forces bIsAiming false exactly like the panic override (so holding RMB
 	// neither zooms the camera nor shows the dot, and everything that reads bIsAiming sees "not aiming"),
@@ -981,6 +994,10 @@ protected:
 	// of TakeDamage() and EnterPanicState().
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Health")
 	bool bImmuneToMonsterAttacks = false;
+
+	// See SetUntouchableByMonsters()/IsUntouchableByMonsters() above.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Health")
+	bool bUntouchableByMonsters = false;
 
 	// See SetAimSuppressed()/IsAimSuppressed() above — checked in Tick() next to the panic override.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Holy Items|Throw")
