@@ -45,4 +45,10 @@ struct MYCHARACTERS_API FPrologueSceneOptions
 	// Seconds he may walk; not there by then = he is put on the mark.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scene")
 	float MaxWalkTime = 6.0f;
+
+	// Step 4.1: only the heroes the scene moves (bound by tag) stop and wait; the others go on with their own scripts.
+	// For a far view where a hero keeps doing his part in the frame: in the binocular shot the Rider runs on along the
+	// river with her own run animation, and the scene's camera only frames the river. Off: every hero waits.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scene")
+	bool bHoldOnlyHeroesInScene = false;
 };

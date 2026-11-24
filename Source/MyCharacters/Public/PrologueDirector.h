@@ -19,6 +19,7 @@ class ULevelSequencePlayer;
 class AIntroSceneDirector;
 class APlayerController;
 class UHeroScriptRunner;
+class UPrologueAction;
 class UPrologueScenarioData;
 class UScriptedKnockdownComponent;
 struct FPrologueAppearancePlacement;
@@ -291,6 +292,10 @@ private:
 	void TickSteps();
 	void BeginStep(int32 StepIndex);
 	void FireCurrentStep(bool bForcedByDebug);
+
+	// Runs a list of actions in order, skipping those whose OnlyIf is not met (logged with LogMark: "-" a step's
+	// actions, "+" a checkpoint setup, "!" a failure).
+	void RunActions(const TArray<TObjectPtr<UPrologueAction>>& Actions, const TCHAR* LogMark);
 
 	// Step 2.9. Starts at StepIndex as a checkpoint: its CheckpointSetup runs, then the step waits. Why is for the log.
 	void StartFromStep(int32 StepIndex, const TCHAR* Why);

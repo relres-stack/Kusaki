@@ -12,6 +12,7 @@
 class APrologueDirector;
 class UAnimSequence;
 class ULevelSequence;
+class UPrologueTrigger;
 
 // "What happens" when a prologue step fires (task 04): one thing the director does, picked from a drop-down in
 // the scenario asset. Steps run their actions in order, all at once. Like UPrologueTrigger, actions live in the
@@ -32,6 +33,15 @@ public:
 	// Step 3.6: draws, for one frame, where this action will put someone (marks), while its step waits. Nothing by
 	// default.
 	virtual void DrawDebug(const APrologueDirector& Director) const {}
+
+	// Step 4.1: the action runs only if this condition holds at the moment it would run (its step fires, a checkpoint
+	// setup or a failure runs it). One step can then cover two outcomes: the binocular shots play only if the
+	// binoculars were really used, not when the player walked off the platform without them. Empty = always.
+	UPROPERTY(EditAnywhere, Instanced, Category = "Only if")
+	TObjectPtr<UPrologueTrigger> OnlyIf;
+
+	// OnlyIf is empty or met.
+	bool ShouldRun(const APrologueDirector& Director) const;
 };
 
 // A line of text on screen — a stand-in for subtitles/voice until those exist.
@@ -208,6 +218,11 @@ public:
 	// Seconds he may walk to the mark; not there by then = he is put on it.
 	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0.5"))
 	float MaxWalkTime = 6.0f;
+
+	// Step 4.1: only the heroes the scene moves (bound by tag) wait; the others go on with their own scripts — the
+	// binocular shot frames the Rider while she runs on along the river. Off: every hero waits while it plays.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bHoldOnlyHeroesInScene = false;
 
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;

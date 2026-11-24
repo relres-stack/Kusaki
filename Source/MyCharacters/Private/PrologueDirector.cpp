@@ -265,14 +265,7 @@ bool APrologueDirector::TickFailCondition(const FPrologueStep& Step)
 	UE_LOG(LogTemp, Warning, TEXT("Prologue: step %d '%s' FAILED (%s) - restart in %.1f s"), CurrentStepIndex + 1, *Step.Name,
 		*Step.FailCondition->Describe(), Step.RestartDelay);
 	ShowDebug(604, Step.RestartDelay + 1.0f, FColor::Red, FString::Printf(TEXT("Prologue: step %d FAILED - restart from the checkpoint"), CurrentStepIndex + 1));
-	for (const UPrologueAction* Action : Step.FailActions)
-	{
-		if (IsValid(Action))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Prologue:   ! %s"), *Action->Describe());
-			Action->Execute(*this);
-		}
-	}
+	RunActions(Step.FailActions, TEXT("!"));
 	return true;
 }
 
@@ -282,14 +275,7 @@ void APrologueDirector::StartFromStep(int32 StepIndex, const TCHAR* Why)
 	UE_LOG(LogTemp, Warning, TEXT("Prologue: %s - step %d '%s', its checkpoint setup: %d action(s)"), Why, StepIndex + 1, *Step.Name,
 		Step.CheckpointSetup.Num());
 	ShowDebug(604, 5.0f, FColor::Yellow, FString::Printf(TEXT("Prologue: %s - step %d"), Why, StepIndex + 1));
-	for (const UPrologueAction* Action : Step.CheckpointSetup)
-	{
-		if (IsValid(Action))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Prologue:   + %s"), *Action->Describe());
-			Action->Execute(*this);
-		}
-	}
+	RunActions(Step.CheckpointSetup, TEXT("+"));
 	BeginStep(StepIndex);
 }
 
@@ -524,7 +510,8 @@ bool APrologueDirector::StartScenePlayback(ULevelSequence* Scene)
 	bHasScenePOV = false;
 	bScenePlaying = true;
 
-	// Step 3.3: the scene owns the heroes — their scripts wait, their AI stops; the player cannot aim.
+	// Step 3.3: the scene owns the heroes — their scripts wait, their AI stops; the player cannot aim. With
+	// bHoldOnlyHeroesInScene (step 4.1) a hero the scene does not move goes on with his script.
 	for (const TPair<FName, TObjectPtr<ABaseCharacter>>& Pair : Heroes)
 	{
 		ABaseCharacter* Hero = Pair.Value;
@@ -532,11 +519,14 @@ bool APrologueDirector::StartScenePlayback(ULevelSequence* Scene)
 		{
 			continue;
 		}
-		if (UHeroScriptRunner* Runner = Hero->FindComponentByClass<UHeroScriptRunner>())
+		const bool bHoldHero = !SceneOptions.bHoldOnlyHeroesInScene || BoundNames.Contains(Pair.Key.ToString());
+		UHeroScriptRunner* Runner = Hero->FindComponentByClass<UHeroScriptRunner>();
+		if (Runner && bHoldHero)
 		{
 			Runner->SetHeldByScene(true);
 		}
-		if (AAIController* AI = Cast<AAIController>(Hero->GetController()))
+		AAIController* AI = Cast<AAIController>(Hero->GetController());
+		if (AI && bHoldHero)
 		{
 			AI->StopMovement();
 		}
@@ -746,16 +736,27 @@ void APrologueDirector::FireCurrentStep(bool bForcedByDebug)
 		Step.Trigger->OnStepEnd(*this);
 	}
 
-	for (const UPrologueAction* Action : Step.Actions)
-	{
-		if (IsValid(Action))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Prologue:   - %s"), *Action->Describe());
-			Action->Execute(*this);
-		}
-	}
+	RunActions(Step.Actions, TEXT("-"));
 
 	BeginStep(FiredIndex + 1);
+}
+
+void APrologueDirector::RunActions(const TArray<TObjectPtr<UPrologueAction>>& Actions, const TCHAR* LogMark)
+{
+	for (const UPrologueAction* Action : Actions)
+	{
+		if (!IsValid(Action))
+		{
+			continue;
+		}
+		if (!Action->ShouldRun(*this))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Prologue:   %s %s - skipped, not: %s"), LogMark, *Action->Describe(), *Action->OnlyIf->Describe());
+			continue;
+		}
+		UE_LOG(LogTemp, Warning, TEXT("Prologue:   %s %s"), LogMark, *Action->Describe());
+		Action->Execute(*this);
+	}
 }
 
 UHeroScriptRunner* APrologueDirector::GetOrAddScriptRunner(ABaseCharacter* Hero)

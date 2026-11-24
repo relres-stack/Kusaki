@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "note": "Prologue (task 04) places on Lvl_RoadToDawn_Terrain. Plan metres like rtd_layout.json: x = east, y = north. Markers are snapped to the ground by a trace; z here is the fallback (measured from the level 24.11.2026 - the Python trace does not work in UE 5.8 yet, see rtd_build_prologue.py). 'face' = the point the marker looks at. Kept apart from rtd_layout.json because rtd_generate_terrain.py rewrites that file.",
+  "director": {
+    "label": "RTD_PrologueDirector",
+    "x": -135.0, "y": -330.0, "z": 88.0,
+    "scenario": "/Game/Prologue/DA_Prologue_RedneckStart",
+    "properties": {"debug_spawn_missing_heroes": false},
+    "properties_note": "Details values set on every run (python names: a bool loses its 'b': bDebugSpawnMissingHeroes is debug_spawn_missing_heroes). The debug spawn would put every missing hero next to the player at the start; here the scenario brings them in ('Place hero at marker')."
+  },
+  "markers": [
+    {"tag": "PL_Platform",      "x": -141.4, "y": -326.8, "z": 87.85, "note": "step 2: the viewpoint with the binoculars; walking 18 m away from it without them starts the run anyway"},
+
+    {"tag": "PL_RiderStart",    "x": 199.0,  "y": -320.0, "z": 17.35, "face": [193.0, -265.0], "note": "step 2: the Rider appears here when the binoculars are used and runs north along the west bank"},
+    {"tag": "PL_RiderRoute_1",  "x": 193.0,  "y": -265.0, "z": 11.24},
+    {"tag": "PL_RiderRoute_2",  "x": 187.0,  "y": -205.0, "z": 7.35},
+    {"tag": "PL_RiderWait",     "x": 174.0,  "y": -158.0, "z": 2.69,  "face": [0.0, -160.0], "note": "she waits here until the next steps take her on"},
+
+    {"tag": "PL_PriestStart",   "x": -135.0, "y": -125.0, "z": 5.47,  "face": [-70.0, -165.0], "note": "step 2: the Priest appears here (west of the village, by the south-west corner of the outer wall; slope ~8 deg - the first spot (-150, -95) was a 29 deg slope without nav-mesh)"},
+    {"tag": "PL_PriestWait",    "x": -70.0,  "y": -165.0, "z": -0.52,  "face": [0.0, -175.0], "note": "west edge of the wasteland in front of the gate; he waits here"},
+
+    {"tag": "PL_NpcScene",      "x": 110.0,  "y": -230.0, "z": 1.52,  "face": [-141.4, -326.8], "note": "binocular shot 2: a monster at the edge of the shadow knocks down an NPC (scene's own stand-ins)"}
+  ],
+  "navmesh_extra": [
+    {"label": "RTD_NavMeshBounds_River", "x": 192.5, "y": -240.0, "w": 85.0, "d": 240.0, "note": "the main nav-mesh ends at x = 190; the Rider runs along the river bank (x 170-205)"}
+  ]
+}

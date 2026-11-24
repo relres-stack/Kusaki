@@ -21,6 +21,7 @@ import unreal
 BUILD_TREES = True
 BUILD_GAMEPLAY = True          # PlayerStart + ABinocularsPickup + ABearTrap + NavMeshBoundsVolume
 BUILD_LIGHTING = False         # the project has its own ADayNightManager - leave False unless you want a quick sunset
+BUILD_PROLOGUE = True          # prologue director + markers from rtd_prologue.json (rtd_build_prologue.py, runs alone too)
 CLEAR_PREVIOUS = True
 MAX_FALLBACK_ACTORS = 1500     # only used if instanced meshes cannot be created (very old/odd setups)
 
@@ -439,4 +440,14 @@ if slow is not None:
         slow.__exit__(None, None, None)
     except Exception:
         pass
+# ------------------------------------------------------------------ prologue places (task 04)
+# A re-run above deleted RoadToDawn_Gen/Prologue together with the rest; its own script puts it back.
+if BUILD_PROLOGUE:
+    try:
+        _pp = os.path.join(os.path.dirname(DATA_PATH), "rtd_build_prologue.py")
+        with open(_pp, encoding="utf-8") as _f:
+            exec(compile(_f.read(), _pp, "exec"), {"__name__": "rtd_build_prologue"})
+    except Exception as ex:  # noqa
+        warn("prologue places not built: %s" % ex)
+
 log("DONE. PlayerStart stands on the cliff above the collapsed tunnel; a footpath leads down to the road, the south gate is open, the north gate is closed.")

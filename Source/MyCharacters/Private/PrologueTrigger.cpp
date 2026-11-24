@@ -4,6 +4,7 @@
 
 #include "BaseCharacter.h"
 #include "BaseMonster.h"
+#include "BinocularsPickup.h"
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 #include "FingerFlamePeekComponent.h"
@@ -155,6 +156,48 @@ bool UPrologueTrigger_TimeElapsed::Check(const APrologueDirector& Director) cons
 FString UPrologueTrigger_TimeElapsed::DescribeCondition() const
 {
 	return FString::Printf(TEXT("%.1f s passed"), Seconds);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Binoculars used
+
+bool UPrologueTrigger_BinocularsUsed::Check(const APrologueDirector& Director) const
+{
+	for (TActorIterator<ABinocularsPickup> It(Director.GetWorld()); It; ++It)
+	{
+		const ABinocularsPickup* Binoculars = *It;
+		if (IsValid(Binoculars) && (BinocularsTag.IsNone() || Binoculars->ActorHasTag(BinocularsTag)) && Binoculars->bHasBeenUsed)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UPrologueTrigger_BinocularsUsed::DrawDebug(const APrologueDirector& Director) const
+{
+	UWorld* World = Director.GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	for (TActorIterator<ABinocularsPickup> It(World); It; ++It)
+	{
+		const ABinocularsPickup* Binoculars = *It;
+		if (IsValid(Binoculars) && (BinocularsTag.IsNone() || Binoculars->ActorHasTag(BinocularsTag)))
+		{
+			const FVector Location = Binoculars->GetActorLocation();
+			DrawDebugLine(World, Location, Location + FVector(0.0f, 0.0f, 400.0f), FColor::Yellow, false, -1.0f, 0, 4.0f);
+			DrawDebugString(World, Location + FVector(0.0f, 0.0f, 420.0f), Binoculars->bHasBeenUsed ? TEXT("binoculars (used)") : TEXT("binoculars"),
+				nullptr, FColor::Yellow, 0.0f, true);
+		}
+	}
+}
+
+FString UPrologueTrigger_BinocularsUsed::DescribeCondition() const
+{
+	return BinocularsTag.IsNone() ? FString(TEXT("binoculars used"))
+		: FString::Printf(TEXT("binoculars '%s' used"), *BinocularsTag.ToString());
 }
 
 // ---------------------------------------------------------------------------------------------------------------

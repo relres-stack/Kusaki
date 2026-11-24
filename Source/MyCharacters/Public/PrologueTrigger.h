@@ -327,6 +327,25 @@ protected:
 	virtual FString DescribeCondition() const override;
 };
 
+// Step 4.1 (scenario step 2): someone has looked through the binoculars on the viewpoint (ABinocularsPickup, used once
+// with E). Only reads the binoculars' public bHasBeenUsed — the binoculars are a stable mechanic and are not changed.
+UCLASS(meta = (DisplayName = "Binoculars used"))
+class MYCHARACTERS_API UPrologueTrigger_BinocularsUsed : public UPrologueTrigger
+{
+	GENERATED_BODY()
+
+public:
+	// Only binoculars with this tag count. Empty = any binoculars in the level.
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	FName BinocularsTag;
+
+	virtual void DrawDebug(const APrologueDirector& Director) const override;
+
+protected:
+	virtual bool Check(const APrologueDirector& Director) const override;
+	virtual FString DescribeCondition() const override;
+};
+
 // The hero has finished the script an action gave him ("Hero script" action): nothing left to do. Never met for a
 // looping script, or while his script waits because the player controls him.
 UCLASS(meta = (DisplayName = "Hero finished his actions"))

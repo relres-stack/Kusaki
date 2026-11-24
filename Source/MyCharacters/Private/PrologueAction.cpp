@@ -15,6 +15,12 @@
 #include "Components/ScriptedKnockdownComponent.h"
 #include "Engine/Engine.h"
 #include "PrologueDirector.h"
+#include "PrologueTrigger.h"
+
+bool UPrologueAction::ShouldRun(const APrologueDirector& Director) const
+{
+	return !IsValid(OnlyIf) || OnlyIf->IsMet(Director);
+}
 
 void UPrologueAction_Message::Execute(APrologueDirector& Director) const
 {
@@ -332,6 +338,7 @@ void UPrologueAction_PlayScene::Execute(APrologueDirector& Director) const
 	Options.CameraBlendIn = CameraBlendIn;
 	Options.PlayerMarkTag = PlayerMarkTag;
 	Options.MaxWalkTime = MaxWalkTime;
+	Options.bHoldOnlyHeroesInScene = bHoldOnlyHeroesInScene;
 	Director.PlayScene(Scene, Options);
 }
 

@@ -24,6 +24,22 @@ void UHeroScriptRunner::Setup(APrologueDirector* InDirector, FName InHeroId, int
 	Director = InDirector;
 	HeroId = InHeroId;
 	SubtitleKey = InSubtitleKey;
+
+	// The heroes' AnimBPs play the walk/run only while the movement has an acceleration (ABP_Unarmed: ShouldMove =
+	// ground speed AND current acceleration). AI path following without "Use Acceleration For Paths" sets the velocity
+	// directly with zero acceleration, so a hero walking his script slid along the path in the idle pose (found
+	// 24.11.2026, step 4.1: the Rider in the binocular shot). Only path following reads this flag — the player moves
+	// by input — so it is switched on for good, through the movement's public nav properties.
+	if (ABaseCharacter* Hero = GetHero())
+	{
+		if (UCharacterMovementComponent* Move = Hero->GetCharacterMovement())
+		{
+			if (FNavMovementProperties* NavProps = Move->GetNavMovementProperties())
+			{
+				NavProps->bUseAccelerationForPaths = true;
+			}
+		}
+	}
 }
 
 ABaseCharacter* UHeroScriptRunner::GetHero() const
