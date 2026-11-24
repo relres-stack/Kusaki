@@ -5,6 +5,8 @@
 #include "AIController.h"
 #include "BaseCharacter.h"
 #include "BaseMonster.h"
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
@@ -313,7 +315,8 @@ void APrologueDirector::RestartFromCheckpoint()
 	GetWorldTimerManager().SetTimer(RestartTimerHandle, this, &APrologueDirector::ReloadLevel, FMath::Max(FadeOut, 0.05f), false);
 }
 
-bool APrologueDirector::PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput, bool bHideHud, float HoldMonstersRadius, FName SwitchControlAtEnd)
+bool APrologueDirector::PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput, bool bHideHud, float HoldMonstersRadius, FName SwitchControlAtEnd,
+	float CameraBlendOut)
 {
 	UWorld* World = GetWorld();
 	if (!World || !IsValid(Scene))
@@ -365,6 +368,10 @@ bool APrologueDirector::PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput,
 	ScenePlayer = Player;
 	CurrentScene = Scene;
 	SceneSwitchControlAtEnd = SwitchControlAtEnd;
+	SceneCameraBlendOut = CameraBlendOut;
+	// Played again: "Scene finished" waits for this run's end, not the previous one.
+	FinishedScenes.Remove(FSoftObjectPath(Scene));
+	bHasScenePOV = false;
 	bScenePlaying = true;
 
 	// Step 3.3: the scene owns the heroes — their scripts wait, their AI stops; the player cannot aim.
@@ -486,12 +493,47 @@ void APrologueDirector::EndScene(bool bSkipped)
 	FTimerHandle AfterSceneLog;
 	GetWorldTimerManager().SetTimer(AfterSceneLog, FTimerDelegate::CreateWeakLambda(this, [LogHeroes]() { LogHeroes(TEXT("end + 0.5 s")); }), 0.5f, false);
 
-	// Step 3.4 (basic): the next hero takes over where the scene ends.
+	// Step 3.4: the next hero takes over where the scene ends...
 	if (!SceneSwitchControlAtEnd.IsNone())
 	{
 		SwitchControlTo(SceneSwitchControlAtEnd);
 	}
 	UpdateAllHeroProtection();
+
+	// ...and the view glides from the scene's last shot to the camera of whoever the player controls now: a temporary
+	// camera stands exactly where the shot was, then the engine blends from it to the hero.
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	APawn* PlayerPawn = IsValid(PC) ? PC->GetPawn() : nullptr;
+	if (SceneCameraBlendOut > 0.0f && bHasScenePOV && IsValid(PlayerPawn))
+	{
+		if (IsValid(SceneBlendCamera))
+		{
+			SceneBlendCamera->Destroy();
+		}
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		Params.ObjectFlags |= RF_Transient;
+		SceneBlendCamera = GetWorld()->SpawnActor<ACameraActor>(LastScenePOV.Location, LastScenePOV.Rotation, Params);
+		if (IsValid(SceneBlendCamera))
+		{
+			if (UCameraComponent* Camera = SceneBlendCamera->GetCameraComponent())
+			{
+				Camera->SetFieldOfView(LastScenePOV.FOV);
+				Camera->SetConstraintAspectRatio(false);
+			}
+			PC->SetViewTarget(SceneBlendCamera);
+			PC->SetViewTargetWithBlend(PlayerPawn, SceneCameraBlendOut, VTBlend_EaseInOut, 2.0f, false);
+			TWeakObjectPtr<ACameraActor> WeakCamera = SceneBlendCamera;
+			GetWorldTimerManager().SetTimer(SceneBlendCleanupHandle, FTimerDelegate::CreateWeakLambda(this, [WeakCamera]()
+			{
+				if (WeakCamera.IsValid())
+				{
+					WeakCamera->Destroy();
+				}
+			}), SceneCameraBlendOut + 0.2f, false);
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: camera glides from the scene's last shot to %s (%.1f s)"), *PlayerPawn->GetName(), SceneCameraBlendOut);
+		}
+	}
 }
 
 void APrologueDirector::ReloadLevel()
@@ -1065,6 +1107,18 @@ void APrologueDirector::ReleaseFromAI(ABaseCharacter* Hero)
 void APrologueDirector::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	// Step 3.4: remember what the scene's camera shows, for the glide back to the hero when it ends.
+	if (bScenePlaying)
+	{
+		const APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+		if (IsValid(PC) && PC->PlayerCameraManager)
+		{
+			LastScenePOV = PC->PlayerCameraManager->GetCameraCacheView();
+			bHasScenePOV = true;
+		}
+	}
+
 	TickSteps();
 	UpdateAllHeroProtection();
 	TickMonsterRoles();

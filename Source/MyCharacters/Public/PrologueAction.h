@@ -186,6 +186,11 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Action")
 	FName SwitchControlAtEnd;
 
+	// Seconds the view glides from the scene's last shot to the camera of the hero the player controls then (the new
+	// one after a switch). 0 = a straight cut.
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0.0"))
+	float CameraBlendOut = 1.0f;
+
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;
 };

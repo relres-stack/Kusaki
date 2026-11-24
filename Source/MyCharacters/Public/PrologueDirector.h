@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Camera/CameraTypes.h"
 #include "InputCoreTypes.h"
 #include "PrologueMonsterRole.h"
 #include "PrologueDirector.generated.h"
@@ -208,8 +209,11 @@ public:
 	// and the game goes on from there. While it plays: the player's input and aim are blocked (bBlockPlayerInput), heroes
 	// are untouchable, their scripts wait, and monsters within HoldMonstersRadius of the player's hero that are on
 	// their own AI stop and wait (they get their AI back afterwards). SwitchControlAtEnd: control passes to that hero
-	// when the scene ends. False if Scene is empty or another scene is still playing.
-	bool PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput, bool bHideHud, float HoldMonstersRadius, FName SwitchControlAtEnd);
+	// when the scene ends. CameraBlendOut (step 3.4): seconds the view glides from the scene's last shot to the camera of
+	// the hero the player controls then (the new one after a switch) — no seam; 0 = a straight cut. False if Scene is
+	// empty or another scene is still playing.
+	bool PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput, bool bHideHud, float HoldMonstersRadius, FName SwitchControlAtEnd,
+		float CameraBlendOut = 1.0f);
 
 	// The scene has played to its end (or was skipped) since the level started.
 	bool HasSceneFinished(const ULevelSequence* Scene) const;
@@ -359,6 +363,18 @@ private:
 
 	bool bScenePlaying = false;
 	FName SceneSwitchControlAtEnd;
+
+	// Step 3.4: what the camera showed on the scene's last frame (captured every frame while it plays), and the
+	// temporary camera standing there while the view glides to the hero. The engine's own blend-out goes back to
+	// the camera from BEFORE the scene (the old hero), which would seam a hero switch — hence done here.
+	float SceneCameraBlendOut = 0.0f;
+	FMinimalViewInfo LastScenePOV;
+	bool bHasScenePOV = false;
+
+	UPROPERTY(Transient)
+	TObjectPtr<class ACameraActor> SceneBlendCamera;
+
+	FTimerHandle SceneBlendCleanupHandle;
 
 	// Monsters the scene stopped (they were on their own AI) — they get it back when it ends.
 	TArray<TWeakObjectPtr<ABaseMonster>> SceneHeldMonsters;

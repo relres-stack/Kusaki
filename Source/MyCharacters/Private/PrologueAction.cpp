@@ -287,7 +287,7 @@ FString UPrologueAction_LightItem::Describe() const
 
 void UPrologueAction_PlayScene::Execute(APrologueDirector& Director) const
 {
-	Director.PlayScene(Scene, bBlockInput, bHideHud, HoldMonstersRadius, SwitchControlAtEnd);
+	Director.PlayScene(Scene, bBlockInput, bHideHud, HoldMonstersRadius, SwitchControlAtEnd, CameraBlendOut);
 }
 
 FString UPrologueAction_PlayScene::Describe() const
