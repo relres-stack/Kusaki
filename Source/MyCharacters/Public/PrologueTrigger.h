@@ -148,6 +148,21 @@ protected:
 	virtual FString DescribeCondition() const override;
 };
 
+// A staged scene ("Play scene") has played to its end, or was skipped (stage 3).
+UCLASS(meta = (DisplayName = "Scene finished"))
+class MYCHARACTERS_API UPrologueTrigger_SceneFinished : public UPrologueTrigger
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	TObjectPtr<class ULevelSequence> Scene;
+
+protected:
+	virtual bool Check(const APrologueDirector& Director) const override;
+	virtual FString DescribeCondition() const override;
+};
+
 // Two heroes are too far apart (step 2.9, a "Failure" condition): farther than MaxDistance, or — along the way to a
 // goal marker — hero A is more than MaxAhead in front of hero B or more than MaxBehind behind him. Step 12b: the Rider
 // must neither ride off ahead nor fall behind the Priest, or he is left without light.

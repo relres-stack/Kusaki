@@ -18,6 +18,10 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "IntroSceneDirector.h"
+#include "LevelSequence.h"
+#include "LevelSequenceActor.h"
+#include "LevelSequencePlayer.h"
+#include "MovieScene.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
 #include "PrologueAction.h"
@@ -307,6 +311,187 @@ void APrologueDirector::RestartFromCheckpoint()
 		PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, FadeOut, FLinearColor::Black, false, true);
 	}
 	GetWorldTimerManager().SetTimer(RestartTimerHandle, this, &APrologueDirector::ReloadLevel, FMath::Max(FadeOut, 0.05f), false);
+}
+
+bool APrologueDirector::PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput, bool bHideHud, float HoldMonstersRadius, FName SwitchControlAtEnd)
+{
+	UWorld* World = GetWorld();
+	if (!World || !IsValid(Scene))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: no scene to play"));
+		return false;
+	}
+	if (bScenePlaying)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: scene '%s' not started - '%s' is still playing"), *Scene->GetName(), *GetNameSafe(CurrentScene));
+		return false;
+	}
+
+	// The previous scene's actor was kept so its Keep State held; it is not needed any more.
+	if (IsValid(SceneActor))
+	{
+		SceneActor->Destroy();
+	}
+
+	FMovieSceneSequencePlaybackSettings Settings;
+	Settings.bDisableMovementInput = bBlockPlayerInput;
+	Settings.bDisableLookAtInput = bBlockPlayerInput;
+	Settings.bHideHud = bHideHud;
+	// Decision 10: after the scene everyone stays where the scene left them, the game goes on from there.
+	Settings.FinishCompletionStateOverride = EMovieSceneCompletionModeOverride::ForceKeepState;
+
+	ALevelSequenceActor* Actor = nullptr;
+	ULevelSequencePlayer* Player = ULevelSequencePlayer::CreateLevelSequencePlayer(World, Scene, Settings, Actor);
+	if (!Player || !IsValid(Actor))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: scene '%s' - could not create its player"), *Scene->GetName());
+		return false;
+	}
+
+	// The real heroes into the scene: a binding tagged with a hero's id ("Priest") moves that hero. Only tags the scene
+	// has (an unknown tag makes the engine warn in the PIE log).
+	TArray<FString> BoundNames;
+	const UMovieScene* Movie = Scene->GetMovieScene();
+	for (const TPair<FName, TObjectPtr<ABaseCharacter>>& Pair : Heroes)
+	{
+		if (IsValid(Pair.Value) && Movie && Movie->AllTaggedBindings().Contains(Pair.Key))
+		{
+			Actor->SetBindingByTag(Pair.Key, { Pair.Value.Get() });
+			BoundNames.Add(Pair.Key.ToString());
+		}
+	}
+
+	SceneActor = Actor;
+	ScenePlayer = Player;
+	CurrentScene = Scene;
+	SceneSwitchControlAtEnd = SwitchControlAtEnd;
+	bScenePlaying = true;
+
+	// Step 3.3: the scene owns the heroes — their scripts wait, their AI stops; the player cannot aim.
+	for (const TPair<FName, TObjectPtr<ABaseCharacter>>& Pair : Heroes)
+	{
+		ABaseCharacter* Hero = Pair.Value;
+		if (!IsValid(Hero))
+		{
+			continue;
+		}
+		if (UHeroScriptRunner* Runner = Hero->FindComponentByClass<UHeroScriptRunner>())
+		{
+			Runner->SetHeldByScene(true);
+		}
+		if (AAIController* AI = Cast<AAIController>(Hero->GetController()))
+		{
+			AI->StopMovement();
+		}
+		if (Hero->IsPlayerControlled() && bBlockPlayerInput)
+		{
+			Hero->SetAimSuppressed(true);
+		}
+	}
+
+	// Monsters on their own AI near the player's hero wait too (their AI would walk into the shot); monsters in a role
+	// keep it — a step put them there for this scene.
+	SceneHeldMonsters.Reset();
+	const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+	if (HoldMonstersRadius > 0.0f && IsValid(PlayerPawn))
+	{
+		for (TActorIterator<ABaseMonster> It(World); It; ++It)
+		{
+			ABaseMonster* Monster = *It;
+			if (IsValid(Monster) && Monster->Health > 0.0f && !Monster->IsScriptControlled() && !Monster->bIsBeingRidden
+				&& FVector::Dist2D(Monster->GetActorLocation(), PlayerPawn->GetActorLocation()) <= HoldMonstersRadius)
+			{
+				Monster->SetScriptControlled(true);
+				SceneHeldMonsters.Add(Monster);
+			}
+		}
+	}
+	UpdateAllHeroProtection();
+
+	Player->OnFinished.AddDynamic(this, &APrologueDirector::HandleSceneFinished);
+	Player->Play();
+
+	for (const FString& Name : BoundNames)
+	{
+		if (const ABaseCharacter* Bound = GetHero(FName(*Name)))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: scene start - %s at %s"), *Name, *Bound->GetActorLocation().ToCompactString());
+		}
+	}
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: scene '%s' plays (%.1f s), heroes bound: %s, monsters held: %d%s"), *Scene->GetName(),
+		Player->GetDuration().AsSeconds(), BoundNames.Num() > 0 ? *FString::Join(BoundNames, TEXT(", ")) : TEXT("none"), SceneHeldMonsters.Num(),
+		SwitchControlAtEnd.IsNone() ? TEXT("") : *FString::Printf(TEXT(", control to %s at the end"), *SwitchControlAtEnd.ToString()));
+	ShowDebug(604, 3.0f, FColor::Yellow, FString::Printf(TEXT("Prologue: scene '%s'"), *Scene->GetName()));
+	return true;
+}
+
+bool APrologueDirector::HasSceneFinished(const ULevelSequence* Scene) const
+{
+	return IsValid(Scene) && FinishedScenes.Contains(FSoftObjectPath(Scene));
+}
+
+void APrologueDirector::HandleSceneFinished()
+{
+	EndScene(false);
+}
+
+void APrologueDirector::EndScene(bool bSkipped)
+{
+	if (!bScenePlaying)
+	{
+		return;
+	}
+	bScenePlaying = false;
+	FinishedScenes.Add(FSoftObjectPath(CurrentScene));
+
+	for (const TPair<FName, TObjectPtr<ABaseCharacter>>& Pair : Heroes)
+	{
+		ABaseCharacter* Hero = Pair.Value;
+		if (!IsValid(Hero))
+		{
+			continue;
+		}
+		if (UHeroScriptRunner* Runner = Hero->FindComponentByClass<UHeroScriptRunner>())
+		{
+			Runner->SetHeldByScene(false);
+		}
+		// Aiming: the same rule as everywhere — suppressed only for a hero under AI.
+		Hero->SetAimSuppressed(!Hero->IsPlayerControlled());
+	}
+
+	// The monsters it stopped get their own AI back — unless a step has meanwhile put them into a group.
+	for (const TWeakObjectPtr<ABaseMonster>& Held : SceneHeldMonsters)
+	{
+		if (Held.IsValid() && FindMonsterGroupOf(Held.Get()).IsNone())
+		{
+			ReleaseMonster(Held.Get());
+		}
+	}
+	SceneHeldMonsters.Reset();
+
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: scene '%s' %s"), *GetNameSafe(CurrentScene), bSkipped ? TEXT("skipped") : TEXT("finished"));
+
+	// Where the scene left the heroes, now and a moment later (to see whether anything puts them back).
+	auto LogHeroes = [this](const TCHAR* When)
+	{
+		for (const TPair<FName, TObjectPtr<ABaseCharacter>>& Pair : Heroes)
+		{
+			if (IsValid(Pair.Value))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Prologue: scene %s - %s at %s"), When, *Pair.Key.ToString(), *Pair.Value->GetActorLocation().ToCompactString());
+			}
+		}
+	};
+	LogHeroes(TEXT("end"));
+	FTimerHandle AfterSceneLog;
+	GetWorldTimerManager().SetTimer(AfterSceneLog, FTimerDelegate::CreateWeakLambda(this, [LogHeroes]() { LogHeroes(TEXT("end + 0.5 s")); }), 0.5f, false);
+
+	// Step 3.4 (basic): the next hero takes over where the scene ends.
+	if (!SceneSwitchControlAtEnd.IsNone())
+	{
+		SwitchControlTo(SceneSwitchControlAtEnd);
+	}
+	UpdateAllHeroProtection();
 }
 
 void APrologueDirector::ReloadLevel()
@@ -1350,7 +1535,8 @@ void APrologueDirector::UpdateHeroProtection(ABaseCharacter* Hero, FName HeroId)
 	const bool bUnderAI = !Hero->IsPlayerControlled();
 	const bool bLying = IsValid(Knockdown) && Knockdown->IsUntouchableWhileDown();
 	const bool bByStep = UntouchableHeroIds.Contains(HeroId);
-	const bool bWanted = bUnderAI || bLying || bByStep;
+	const bool bInScene = bScenePlaying;   // stage 3: nobody gets hurt while a scene plays
+	const bool bWanted = bUnderAI || bLying || bByStep || bInScene;
 	if (Hero->IsUntouchableByMonsters() == bWanted)
 	{
 		return;
@@ -1358,7 +1544,8 @@ void APrologueDirector::UpdateHeroProtection(ABaseCharacter* Hero, FName HeroId)
 
 	Hero->SetUntouchableByMonsters(bWanted);
 	const FString Why = !bWanted ? FString(TEXT("monsters can hit him again"))
-		: FString::Printf(TEXT("untouchable by monsters (%s)"), bUnderAI ? TEXT("under AI") : (bLying ? TEXT("lying after a scripted fall") : TEXT("scenario step")));
+		: FString::Printf(TEXT("untouchable by monsters (%s)"), bUnderAI ? TEXT("under AI") : (bLying ? TEXT("lying after a scripted fall")
+			: (bInScene ? TEXT("scene") : TEXT("scenario step"))));
 	UE_LOG(LogTemp, Warning, TEXT("Prologue: %s - %s"), *HeroId.ToString(), *Why);
 	ShowDebug(609, 4.0f, bWanted ? FColor::Green : FColor::Orange, FString::Printf(TEXT("Prologue: %s - %s"), *HeroId.ToString(), *Why));
 }
@@ -1410,7 +1597,17 @@ void APrologueDirector::TickDebug()
 		RestartFromCheckpoint();
 	}
 
-	if (bDebugSkipStepKey && DebugSkipStepKey.IsValid() && PC->WasInputKeyJustPressed(DebugSkipStepKey))
+	if (bDebugSkipStepKey && DebugSkipStepKey.IsValid() && PC->WasInputKeyJustPressed(DebugSkipStepKey) && bScenePlaying)
+	{
+		// While a scene plays, the skip key skips the scene (to its last frame), not the step.
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: scene '%s' skipped (debug)"), *GetNameSafe(CurrentScene));
+		if (IsValid(ScenePlayer))
+		{
+			ScenePlayer->GoToEndAndStop();
+		}
+		EndScene(true);
+	}
+	else if (bDebugSkipStepKey && DebugSkipStepKey.IsValid() && PC->WasInputKeyJustPressed(DebugSkipStepKey))
 	{
 		if (Scenario->Steps.IsValidIndex(CurrentStepIndex))
 		{
@@ -1475,6 +1672,11 @@ void APrologueDirector::TickDebug()
 					StepLine += TEXT(" | fails if: ") + Step.FailCondition->Describe();
 				}
 				Step.FailCondition->DrawDebug(*this);
+			}
+			if (bScenePlaying && IsValid(ScenePlayer))
+			{
+				StepLine += FString::Printf(TEXT(" | SCENE '%s' %.1f/%.1f s"), *GetNameSafe(CurrentScene),
+					ScenePlayer->GetCurrentTime().AsSeconds(), ScenePlayer->GetDuration().AsSeconds());
 			}
 			StepLine += LastCheckpointIndex != INDEX_NONE
 				? FString::Printf(TEXT(" | checkpoint: step %d"), LastCheckpointIndex + 1) : FString(TEXT(" | no checkpoint yet"));

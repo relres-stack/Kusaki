@@ -18,6 +18,10 @@ public class MyCharacters : ModuleRules
 		// CableComponent: UCableComponent, the visible chain between the Censer and the holder's hand/belt
 		// socket — see AHolyItem::ChainVisualComponent/AttachChainToSocket().
 		PrivateDependencyModuleNames.AddRange(new string[] { "Niagara", "UMG", "Slate", "SlateCore", "EnhancedInput", "CableComponent" });
+
+		// LevelSequence/MovieScene: the prologue's staged scenes (APrologueDirector::PlayScene(), task 04 stage 3) —
+		// Level Sequences played with the real heroes bound to their tracks by tag.
+		PrivateDependencyModuleNames.AddRange(new string[] { "LevelSequence", "MovieScene" });
 		
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");

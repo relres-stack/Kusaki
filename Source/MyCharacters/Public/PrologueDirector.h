@@ -11,6 +11,9 @@
 class AAIController;
 class ABaseCharacter;
 class ABaseMonster;
+class ALevelSequenceActor;
+class ULevelSequence;
+class ULevelSequencePlayer;
 class AIntroSceneDirector;
 class APlayerController;
 class UHeroScriptRunner;
@@ -199,6 +202,21 @@ public:
 	// candle only inside its cone), so a role monster holds at the light's edge instead of walking into it.
 	FVector KeepOutOfHeroLight(const FVector& Goal, const ABaseMonster& Monster) const;
 
+	// Stage 3 (steps 3.1, 3.3, basic 3.4): plays a staged scene — a Level Sequence shot on the level's own spots. Its
+	// tracks are bound to the REAL heroes by tag: a binding tagged "Priest" in the sequence moves this level's Priest
+	// (ALevelSequenceActor::SetBindingByTag), so after the scene every hero stays where the scene left him (Keep State)
+	// and the game goes on from there. While it plays: the player's input and aim are blocked (bBlockPlayerInput), heroes
+	// are untouchable, their scripts wait, and monsters within HoldMonstersRadius of the player's hero that are on
+	// their own AI stop and wait (they get their AI back afterwards). SwitchControlAtEnd: control passes to that hero
+	// when the scene ends. False if Scene is empty or another scene is still playing.
+	bool PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput, bool bHideHud, float HoldMonstersRadius, FName SwitchControlAtEnd);
+
+	// The scene has played to its end (or was skipped) since the level started.
+	bool HasSceneFinished(const ULevelSequence* Scene) const;
+
+	UFUNCTION(BlueprintPure, Category = "Prologue|Scene")
+	bool IsScenePlaying() const { return bScenePlaying; }
+
 	// Step 2.9: fades to black and reloads the level; the prologue then goes on from the last checkpoint reached
 	// (UPrologueCheckpointSubsystem), or from the beginning if there is none.
 	UFUNCTION(BlueprintCallable, Category = "Prologue")
@@ -276,6 +294,11 @@ private:
 	void ReloadLevel();
 	class UPrologueCheckpointSubsystem* GetCheckpoints() const;
 
+	// Stage 3: the scene's player says it has finished (or was stopped); EndScene() gives the game back.
+	UFUNCTION()
+	void HandleSceneFinished();
+	void EndScene(bool bSkipped);
+
 	// A line on screen for the player (the failure warning) — key 605, like the "Message" action; not debug-only.
 	static void ShowSubtitle(const FString& Text, float Seconds);
 
@@ -323,4 +346,23 @@ private:
 
 	// For the readout: the last checkpoint reached (index), INDEX_NONE if none.
 	int32 LastCheckpointIndex = INDEX_NONE;
+
+	// Stage 3: the scene playing now (its actor stays until the next scene so Keep State holds).
+	UPROPERTY(Transient)
+	TObjectPtr<ALevelSequenceActor> SceneActor;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ULevelSequencePlayer> ScenePlayer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ULevelSequence> CurrentScene;
+
+	bool bScenePlaying = false;
+	FName SceneSwitchControlAtEnd;
+
+	// Monsters the scene stopped (they were on their own AI) — they get it back when it ends.
+	TArray<TWeakObjectPtr<ABaseMonster>> SceneHeldMonsters;
+
+	// Scenes played to the end (or skipped) since the level started.
+	TSet<FSoftObjectPath> FinishedScenes;
 };

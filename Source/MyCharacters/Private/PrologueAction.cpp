@@ -8,6 +8,7 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "LevelSequence.h"
 #include "BaseMonster.h"
 #include "Components/HeroScriptRunner.h"
 #include "Components/ScriptedKnockdownComponent.h"
@@ -282,6 +283,17 @@ FString UPrologueAction_LightItem::Describe() const
 	return FString::Printf(TEXT("%s %s his %s%s"), HeroId.IsNone() ? TEXT("player's hero") : *HeroId.ToString(),
 		bLight ? TEXT("lights") : TEXT("puts out"), ItemType == EHolyItemType::Censer ? TEXT("censer") : TEXT("candles"),
 		bLight && Fuel >= 0.0f ? *FString::Printf(TEXT(" (fuel set to %.0f)"), Fuel) : TEXT(""));
+}
+
+void UPrologueAction_PlayScene::Execute(APrologueDirector& Director) const
+{
+	Director.PlayScene(Scene, bBlockInput, bHideHud, HoldMonstersRadius, SwitchControlAtEnd);
+}
+
+FString UPrologueAction_PlayScene::Describe() const
+{
+	return FString::Printf(TEXT("scene '%s'%s"), *GetNameSafe(Scene),
+		SwitchControlAtEnd.IsNone() ? TEXT("") : *FString::Printf(TEXT(", then control to %s"), *SwitchControlAtEnd.ToString()));
 }
 
 void UPrologueAction_KillHero::Execute(APrologueDirector& Director) const

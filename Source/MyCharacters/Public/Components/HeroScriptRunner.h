@@ -50,9 +50,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Hero Script")
 	bool IsBusy() const { return bHasScript && !bFinished; }
 
-	// The script waits because the hero is not under his AI controller (the player controls him).
+	// The script waits because the hero is not under his AI controller (the player controls him), or a scene holds
+	// him (SetHeldByScene()).
 	UFUNCTION(BlueprintPure, Category = "Hero Script")
 	bool IsPaused() const { return IsBusy() && bPaused; }
+
+	// Stage 3: while a scene plays, the scene moves the hero — his script waits the same way it waits for the player
+	// (the running command stops and starts over from its beginning afterwards).
+	void SetHeldByScene(bool bHeld) { bHeldByScene = bHeld; }
 
 	bool IsRunning(const UObject* InSource, int32 InSourceSerial) const;
 	bool HasFinished(const UObject* InSource, int32 InSourceSerial) const;
@@ -109,6 +114,7 @@ private:
 	bool bHasScript = false;
 	bool bFinished = false;
 	bool bPaused = false;
+	bool bHeldByScene = false;
 	bool bCommandStarted = false;
 	int32 CommandIndex = INDEX_NONE;
 

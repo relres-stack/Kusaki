@@ -11,6 +11,7 @@
 
 class APrologueDirector;
 class UAnimSequence;
+class ULevelSequence;
 
 // "What happens" when a prologue step fires (task 04): one thing the director does, picked from a drop-down in
 // the scenario asset. Steps run their actions in order, all at once. Like UPrologueTrigger, actions live in the
@@ -149,6 +150,41 @@ public:
 	// On: protected from now on. Off: ordinary rules again (unless he is under AI or lying after a protected fall).
 	UPROPERTY(EditAnywhere, Category = "Action")
 	bool bUntouchable = true;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
+// A staged scene (stage 3, decision 10): a Level Sequence shot on the level's spots, played with the REAL heroes —
+// in the sequence, give each hero's binding a tag with his hero id ("Redneck", "Priest", "Rider"; while making the
+// scene, bind a stand-in of that Blueprint placed in the level, then delete the stand-in — the tag is what counts).
+// Camera shots, movement and animations live in the sequence; after it everyone stays where it left them. Wait for
+// its end with the "Scene finished" trigger.
+UCLASS(meta = (DisplayName = "Play scene (Level Sequence)"))
+class MYCHARACTERS_API UPrologueAction_PlayScene : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, Category = "Action")
+	TObjectPtr<ULevelSequence> Scene;
+
+	// The player cannot move or turn the camera while it plays (and cannot aim).
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bBlockInput = true;
+
+	// The HUD is hidden while it plays.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bHideHud = false;
+
+	// Monsters on their own AI this close to the player's hero (flat, cm) stop and wait while it plays, so they do not
+	// walk into the shot. 0 = none. Monsters in a role keep their role.
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0.0"))
+	float HoldMonstersRadius = 3000.0f;
+
+	// Control passes to this hero when the scene ends (a hero switch scene, decision 2). Empty = no switch.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName SwitchControlAtEnd;
 
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;

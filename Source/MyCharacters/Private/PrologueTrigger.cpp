@@ -11,6 +11,7 @@
 #include "Components/HeroScriptRunner.h"
 #include "Components/VisionFireSourceComponent.h"
 #include "HeroScriptCommand.h"
+#include "LevelSequence.h"
 #include "Kismet/GameplayStatics.h"
 #include "PrologueDirector.h"
 
@@ -184,6 +185,19 @@ bool UPrologueTrigger_NoMonstersNear::Check(const APrologueDirector& Director) c
 FString UPrologueTrigger_NoMonstersNear::DescribeCondition() const
 {
 	return FString::Printf(TEXT("no monsters within %.0f m of %s"), Radius / 100.0f, *HeroName(HeroId));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Scene finished
+
+bool UPrologueTrigger_SceneFinished::Check(const APrologueDirector& Director) const
+{
+	return Director.HasSceneFinished(Scene);
+}
+
+FString UPrologueTrigger_SceneFinished::DescribeCondition() const
+{
+	return FString::Printf(TEXT("scene '%s' finished"), *GetNameSafe(Scene));
 }
 
 // ---------------------------------------------------------------------------------------------------------------

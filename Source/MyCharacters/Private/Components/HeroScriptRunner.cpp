@@ -115,8 +115,8 @@ void UHeroScriptRunner::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 		return;
 	}
 
-	// Only under his own AI: the player's hero does what the player does.
-	if (!IsValid(GetAIController()))
+	// Only under his own AI: the player's hero does what the player does. And not while a scene moves him.
+	if (!IsValid(GetAIController()) || bHeldByScene)
 	{
 		if (bCommandStarted)
 		{
@@ -125,7 +125,8 @@ void UHeroScriptRunner::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 		if (!bPaused)
 		{
 			bPaused = true;
-			UE_LOG(LogTemp, Warning, TEXT("Prologue: %s's script waits - the player controls him"), *GetHeroName());
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: %s's script waits - %s"), *GetHeroName(),
+				bHeldByScene ? TEXT("a scene plays") : TEXT("the player controls him"));
 		}
 		return;
 	}
@@ -239,7 +240,7 @@ FString UHeroScriptRunner::DescribeState() const
 	const FString Progress = IsValid(Current) ? Current->DescribeProgress(*this) : FString();
 	return FString::Printf(TEXT("%d/%d %s%s%s%s"), CommandIndex + 1, Script.Num(), *What,
 		Progress.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" [%s]"), *Progress),
-		bLoop ? TEXT(" (loop)") : TEXT(""), bPaused ? TEXT(" (waits: player controls him)") : TEXT(""));
+		bLoop ? TEXT(" (loop)") : TEXT(""), !bPaused ? TEXT("") : (bHeldByScene ? TEXT(" (waits: a scene plays)") : TEXT(" (waits: player controls him)")));
 }
 
 void UHeroScriptRunner::DrawDebug() const
