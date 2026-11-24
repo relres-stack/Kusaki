@@ -148,6 +148,27 @@ protected:
 	virtual FString DescribeCondition() const override;
 };
 
+// The hero rides a monster of a group (step 2.8c): "the Rider has mounted the monster sitting on the Priest" (step 12).
+// The monster leaves its group the moment it is ridden; the director remembers where it came from.
+UCLASS(meta = (DisplayName = "Hero rides a monster of a group"))
+class MYCHARACTERS_API UPrologueTrigger_HeroRidesGroupMonster : public UPrologueTrigger
+{
+	GENERATED_BODY()
+
+public:
+	// The rider. Empty = the hero the player controls.
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	FName HeroId = TEXT("Rider");
+
+	// None = any monster.
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	FName GroupName = TEXT("Alpha");
+
+protected:
+	virtual bool Check(const APrologueDirector& Director) const override;
+	virtual FString DescribeCondition() const override;
+};
+
 // At least MinCount living monsters of a group (step 2.8, "Monster group: role") are near the hero: "the pack has
 // closed in". With Invert: fewer than MinCount — "the Priest has driven them off the Redneck".
 UCLASS(meta = (DisplayName = "Monsters of a group near hero"))

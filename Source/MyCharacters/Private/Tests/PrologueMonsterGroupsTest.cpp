@@ -10,9 +10,12 @@
 //   (d) Picking the group again: previous members not picked again go back to their own AI.
 //   (e) "Monster group: do once" (step 2.8b): Stun with MaxCount 1 stuns only the member nearest to the hero;
 //       KnockBack with a Radius staggers the members within it and not the far one.
+//   (f) "Sit on hero" (step 2.8c): collision pass-through while sitting, undone when ridden; the ridden monster leaves
+//       its group but WasMonsterInGroup() still names it.
 #include "Misc/AutomationTest.h"
 #include "BaseCharacter.h"
 #include "BaseMonster.h"
+#include "Components/CapsuleComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -147,6 +150,30 @@ bool FPrologueMonsterGroupsTest::RunTest(const FString& Parameters)
 			Bounce->Execute(*Director);
 			bPassed &= TestTrue(TEXT("(e) KnockBack within 10 m: Middle is staggered"), Middle->bIsStaggered);
 			bPassed &= TestFalse(TEXT("(e) ... Far (30 m) is not"), Far->bIsStaggered);
+
+			// (f) "Sit on hero" (step 2.8c): the nearest monster and the hero ignore each other's collision while the
+			// role lasts; once someone rides it, it leaves the group, they collide again, and the director still
+			// knows which group it came from ("Hero rides a monster of a group").
+			FPrologueMonsterSelection NearestOne;
+			NearestOne.Radius = 0.0f;
+			NearestOne.MaxCount = 1;
+			NearestOne.bSkipOtherGroups = false;
+			bPassed &= TestEqual(TEXT("(f) Group Alpha takes one"), Director->SelectMonsterGroup(TEXT("Alpha"), NearestOne), 1);
+			bPassed &= TestTrue(TEXT("(f) ... the nearest"), Director->GetMonsterGroup(TEXT("Alpha")).Contains(Near));
+
+			Director->SetMonsterGroupRole(TEXT("Alpha"), NewObject<UPrologueMonsterRole_SitOnHero>(), 0.0f, false);
+			Director->Tick(0.1f);
+			bPassed &= TestTrue(TEXT("(f) Sitting: the monster ignores the hero"), Near->GetCapsuleComponent()->GetMoveIgnoreActors().Contains(Hero));
+			bPassed &= TestTrue(TEXT("(f) ... and the hero ignores the monster"), Hero->GetCapsuleComponent()->GetMoveIgnoreActors().Contains(Near));
+
+			Near->bIsBeingRidden = true;
+			Director->Tick(0.1f);
+			bPassed &= TestEqual(TEXT("(f) Ridden: it left the group"), Director->FindMonsterGroupOf(Near), FName());
+			bPassed &= TestTrue(TEXT("(f) ... but it was in Alpha"), Director->WasMonsterInGroup(Near, TEXT("Alpha")));
+			bPassed &= TestFalse(TEXT("(f) ... not in another group"), Director->WasMonsterInGroup(Near, TEXT("D")));
+			bPassed &= TestFalse(TEXT("(f) ... and they collide again"), Near->GetCapsuleComponent()->GetMoveIgnoreActors().Contains(Hero));
+			bPassed &= TestFalse(TEXT("(f) ... both ways"), Hero->GetCapsuleComponent()->GetMoveIgnoreActors().Contains(Near));
+			Near->bIsBeingRidden = false;
 
 			Hero->Destroy();
 			PC->Destroy();

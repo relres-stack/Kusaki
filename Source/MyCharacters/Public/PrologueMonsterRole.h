@@ -64,6 +64,10 @@ struct MYCHARACTERS_API FPrologueRoleMemberState
 	double RetreatUntil = 0.0;
 
 	bool IsRetreating(double Time) const { return Time < RetreatUntil; }
+
+	// "Sit on hero": the hero this monster and he ignore each other's collision with (so it can stand right on top of
+	// him). Undone by the director whenever the monster leaves the role (APrologueDirector::ClearMemberState()).
+	TWeakObjectPtr<ABaseCharacter> PassThroughHero;
 };
 
 // Everything a role needs for one monster this frame.
@@ -145,6 +149,10 @@ protected:
 	virtual bool GetGoal(const FPrologueRoleContext& Context, const FPrologueRoleMemberState& State, FVector& OutGoal, float& OutAcceptance) const
 		PURE_VIRTUAL(UPrologueMonsterRole::GetGoal, return false;);
 
+	// Every frame before the goal, while the hero is in the level (also while the monster is stunned or hiding from
+	// the sun): a role's own setup that must hold the whole time. Nothing by default.
+	virtual void UpdateMember(const FPrologueRoleContext& Context, FPrologueRoleMemberState& State) const {}
+
 	// "Redneck" or "player's hero".
 	FString HeroName() const;
 };
@@ -195,6 +203,33 @@ public:
 
 protected:
 	virtual bool GetGoal(const FPrologueRoleContext& Context, const FPrologueRoleMemberState& State, FVector& OutGoal, float& OutAcceptance) const override;
+};
+
+// The most dangerous monster sits on a hero lying on the ground (step 10: on the Priest, until the Rider mounts it and
+// drags it off, step 12). It stands right on top of him, facing him: the two ignore each other's collision while the
+// role lasts, and swings at him now and then if "Fake swings" is on. A real "sitting" pose needs its own animation
+// (outside this task). Give it to a group of one ("Monster group: role", Max Count 1 or a tag).
+UCLASS(meta = (DisplayName = "Sit on hero (pin him down)"))
+class MYCHARACTERS_API UPrologueMonsterRole_SitOnHero : public UPrologueMonsterRole
+{
+	GENERATED_BODY()
+
+public:
+	UPrologueMonsterRole_SitOnHero();
+
+	// How far from his centre it stands (flat, cm), on the side it came from. 0 = right on top of him.
+	UPROPERTY(EditAnywhere, Category = "Role", meta = (ClampMin = "0.0"))
+	float SitDistance = 40.0f;
+
+	// The monster and the hero ignore each other's collision, so it can stand on him. Off: it stops against him.
+	UPROPERTY(EditAnywhere, Category = "Role")
+	bool bPassThroughHero = true;
+
+	virtual FString Describe() const override;
+
+protected:
+	virtual bool GetGoal(const FPrologueRoleContext& Context, const FPrologueRoleMemberState& State, FVector& OutGoal, float& OutAcceptance) const override;
+	virtual void UpdateMember(const FPrologueRoleContext& Context, FPrologueRoleMemberState& State) const override;
 };
 
 // A named group of monsters and its current role, kept by APrologueDirector (step 2.8). Members and States go in

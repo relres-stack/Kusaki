@@ -175,6 +175,10 @@ public:
 	// Name of the group the monster is in, None if in none.
 	FName FindMonsterGroupOf(const ABaseMonster* Monster) const;
 
+	// The monster is in group GroupName, or left it because a hero rides it (step 2.8c: a ridden monster leaves its
+	// group at once, but "Hero rides a monster of a group" must still know where it came from).
+	bool WasMonsterInGroup(const ABaseMonster* Monster, FName GroupName) const;
+
 	// Largest light radius (cm) of the hero's lit held items; 0 = no light.
 	float GetHeroLightRadius(const ABaseCharacter* Hero) const;
 
@@ -229,6 +233,10 @@ private:
 	// The monster goes back to its own AI from wherever it stands (focus cleared, its speed for its state).
 	void ReleaseMonster(ABaseMonster* Monster) const;
 
+	// Undoes what a role set up on this member (the "Sit on hero" collision pass-through); called whenever a monster
+	// leaves its role: role changed or ended, monster dropped, dead or ridden.
+	void ClearMemberState(ABaseMonster* Monster, FPrologueRoleMemberState& State) const;
+
 	// Ring places in the order the members stand around the role's hero (FPrologueRoleMemberState::SlotIndex).
 	void AssignRoleSlots(FPrologueMonsterGroup& Group) const;
 
@@ -261,6 +269,9 @@ private:
 	// Step 2.8: monster groups by name.
 	UPROPERTY(Transient)
 	TMap<FName, FPrologueMonsterGroup> MonsterGroups;
+
+	// Monsters that left a group because a hero rides them, and that group (WasMonsterInGroup()).
+	TMap<TWeakObjectPtr<ABaseMonster>, FName> RiddenAwayFrom;
 
 	bool bStarted = false;
 	int32 StartAttempts = 0;

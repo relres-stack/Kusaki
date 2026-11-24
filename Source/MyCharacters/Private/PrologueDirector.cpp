@@ -767,6 +767,7 @@ int32 APrologueDirector::SelectMonsterGroup(FName GroupName, const FPrologueMons
 		{
 			if (Picked.Contains(Pair.Value.Members[Index]))
 			{
+				ClearMemberState(Pair.Value.Members[Index].Get(), Pair.Value.States[Index]);
 				Pair.Value.Members.RemoveAt(Index);
 				Pair.Value.States.RemoveAt(Index);
 			}
@@ -774,12 +775,17 @@ int32 APrologueDirector::SelectMonsterGroup(FName GroupName, const FPrologueMons
 	}
 
 	FPrologueMonsterGroup& Group = MonsterGroups.FindOrAdd(GroupName);
-	// Previous members not picked again go back to their own AI.
-	for (const TWeakObjectPtr<ABaseMonster>& Old : Group.Members)
+	// Previous members not picked again go back to their own AI; everyone's role state starts afresh.
+	for (int32 Index = 0; Index < Group.Members.Num(); ++Index)
 	{
-		if (Old.IsValid() && !Picked.Contains(Old))
+		ABaseMonster* Old = Group.Members[Index].Get();
+		if (Group.States.IsValidIndex(Index))
 		{
-			ReleaseMonster(Old.Get());
+			ClearMemberState(Old, Group.States[Index]);
+		}
+		if (IsValid(Old) && !Picked.Contains(Group.Members[Index]))
+		{
+			ReleaseMonster(Old);
 		}
 	}
 	Group.Members = Picked;
@@ -808,6 +814,12 @@ void APrologueDirector::SetMonsterGroupRole(FName GroupName, UPrologueMonsterRol
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Prologue: no monster group '%s' (pick its monsters first) - role skipped"), *GroupName.ToString());
 		return;
+	}
+
+	// The old role's setup on its monsters ends with it.
+	for (int32 Index = 0; Index < Group->Members.Num() && Index < Group->States.Num(); ++Index)
+	{
+		ClearMemberState(Group->Members[Index].Get(), Group->States[Index]);
 	}
 
 	Group->Role = NewRole;
@@ -929,6 +941,38 @@ FVector APrologueDirector::KeepOutOfHeroLight(const FVector& Goal, const ABaseMo
 	return Result;
 }
 
+bool APrologueDirector::WasMonsterInGroup(const ABaseMonster* Monster, FName GroupName) const
+{
+	if (!IsValid(Monster))
+	{
+		return false;
+	}
+	if (FindMonsterGroupOf(Monster) == GroupName)
+	{
+		return true;
+	}
+	for (const TPair<TWeakObjectPtr<ABaseMonster>, FName>& Pair : RiddenAwayFrom)
+	{
+		if (Pair.Key.Get() == Monster && Pair.Value == GroupName)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void APrologueDirector::ClearMemberState(ABaseMonster* Monster, FPrologueRoleMemberState& State) const
+{
+	// "Sit on hero": the monster and the hero collide again.
+	ABaseCharacter* Hero = State.PassThroughHero.Get();
+	if (IsValid(Hero) && IsValid(Monster))
+	{
+		Monster->MoveIgnoreActorRemove(Hero);
+		Hero->MoveIgnoreActorRemove(Monster);
+	}
+	State.PassThroughHero.Reset();
+}
+
 void APrologueDirector::ReleaseMonster(ABaseMonster* Monster) const
 {
 	if (!IsValid(Monster))
@@ -997,9 +1041,12 @@ void APrologueDirector::TickMonsterRoles()
 			const bool bRidden = !bGone && Monster->bIsBeingRidden;
 			if (bGone || bRidden)
 			{
+				ClearMemberState(Monster, Group.States[Index]);
 				if (bRidden)
 				{
 					ReleaseMonster(Monster);
+					// "Hero rides a monster of a group" still has to know where it came from.
+					RiddenAwayFrom.Add(Monster, Pair.Key);
 				}
 				UE_LOG(LogTemp, Warning, TEXT("Prologue: group '%s' - %s leaves the group (%s)"), *Pair.Key.ToString(),
 					*GetNameSafe(Monster), bRidden ? TEXT("someone rides it") : TEXT("dead"));
@@ -1016,9 +1063,10 @@ void APrologueDirector::TickMonsterRoles()
 		{
 			UE_LOG(LogTemp, Warning, TEXT("Prologue: group '%s' - role time is up, back to their own AI"), *Pair.Key.ToString());
 			Group.Role = nullptr;
-			for (const TWeakObjectPtr<ABaseMonster>& Member : Group.Members)
+			for (int32 Index = 0; Index < Group.Members.Num(); ++Index)
 			{
-				ReleaseMonster(Member.Get());
+				ClearMemberState(Group.Members[Index].Get(), Group.States[Index]);
+				ReleaseMonster(Group.Members[Index].Get());
 			}
 			continue;
 		}

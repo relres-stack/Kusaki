@@ -117,6 +117,12 @@ void UPrologueMonsterRole::TickMember(const FPrologueRoleContext& Context, FProl
 		}
 	}
 
+	// The role's own setup holds even while the monster is stunned or hiding (e.g. "Sit on hero" collision).
+	if (IsValid(Context.Hero) && !Context.Hero->bIsDead)
+	{
+		UpdateMember(Context, State);
+	}
+
 	// Its own reactions come first: a stun or a knockback (a candle, a censer swing) and the run from the sun. A move
 	// sent now would cancel the stun's stop or drag it back into the sun.
 	if (bHit || Monster->GetIsFleeingToShadow())
@@ -279,6 +285,61 @@ bool UPrologueMonsterRole_Surround::GetGoal(const FPrologueRoleContext& Context,
 	OutGoal = Context.Hero->GetActorLocation() + FRotator(0.0f, Yaw, 0.0f).Vector() * RingRadius;
 	OutAcceptance = 40.0f;
 	return true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Sit on hero
+
+UPrologueMonsterRole_SitOnHero::UPrologueMonsterRole_SitOnHero()
+{
+	// Pinning him down: swings at him now and then from up close.
+	bFakeSwings = true;
+	SwingDistance = 200.0f;
+	SwingIntervalMin = 1.5f;
+	SwingIntervalMax = 3.5f;
+}
+
+void UPrologueMonsterRole_SitOnHero::UpdateMember(const FPrologueRoleContext& Context, FPrologueRoleMemberState& State) const
+{
+	ABaseMonster* Monster = Context.Monster;
+	ABaseCharacter* Hero = Context.Hero;
+	ABaseCharacter* Previous = State.PassThroughHero.Get();
+	if (Previous == Hero && (bPassThroughHero || !IsValid(Previous)))
+	{
+		return;
+	}
+	// The hero changed (an empty HeroId follows the player's hero) or the option is off: undo the old pair first.
+	if (IsValid(Previous))
+	{
+		Monster->MoveIgnoreActorRemove(Previous);
+		Previous->MoveIgnoreActorRemove(Monster);
+		State.PassThroughHero.Reset();
+	}
+	if (bPassThroughHero)
+	{
+		Monster->MoveIgnoreActorAdd(Hero);
+		Hero->MoveIgnoreActorAdd(Monster);
+		State.PassThroughHero = Hero;
+	}
+}
+
+bool UPrologueMonsterRole_SitOnHero::GetGoal(const FPrologueRoleContext& Context, const FPrologueRoleMemberState& State, FVector& OutGoal, float& OutAcceptance) const
+{
+	const FVector HeroLocation = Context.Hero->GetActorLocation();
+	FVector Side = Context.Monster->GetActorLocation() - HeroLocation;
+	Side.Z = 0.0f;
+	if (!Side.Normalize())
+	{
+		Side = FVector::ForwardVector;
+	}
+	OutGoal = HeroLocation + Side * SitDistance;
+	OutAcceptance = 30.0f;
+	return true;
+}
+
+FString UPrologueMonsterRole_SitOnHero::Describe() const
+{
+	return FString::Printf(TEXT("sit on %s%s"), *HeroName(), bFakeSwings ? TEXT(", swings at him") : TEXT(""));
 }
 
 FString UPrologueMonsterRole_Surround::Describe() const

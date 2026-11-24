@@ -187,6 +187,27 @@ FString UPrologueTrigger_NoMonstersNear::DescribeCondition() const
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Hero rides a monster of a group
+
+bool UPrologueTrigger_HeroRidesGroupMonster::Check(const APrologueDirector& Director) const
+{
+	const ABaseCharacter* Hero = Director.ResolveHero(HeroId);
+	if (!IsValid(Hero) || !Hero->IsMounted())
+	{
+		return false;
+	}
+	const ABaseMonster* Monster = Hero->GetMountedMonster();
+	return IsValid(Monster) && (GroupName.IsNone() || Director.WasMonsterInGroup(Monster, GroupName));
+}
+
+FString UPrologueTrigger_HeroRidesGroupMonster::DescribeCondition() const
+{
+	return GroupName.IsNone()
+		? FString::Printf(TEXT("%s rides a monster"), *HeroName(HeroId))
+		: FString::Printf(TEXT("%s rides a monster of group '%s'"), *HeroName(HeroId), *GroupName.ToString());
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Monsters of a group near hero
 
 bool UPrologueTrigger_MonsterGroupNear::Check(const APrologueDirector& Director) const
