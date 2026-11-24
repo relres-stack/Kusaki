@@ -1015,9 +1015,14 @@ protected:
 	// broadcasting OnHighlightedItemChanged whenever it actually does.
 	void ScanForInteractable();
 
+public:
 	// Attaches Item to whichever hand socket is free and records it in EquippedRightHand/
-	// EquippedLeftHand. No-ops if both hands are already full.
+	// EquippedLeftHand. No-ops if both hands are already full. Public (task 04, step 2.10, user-approved
+	// 24.11.2026): the prologue gives a hero an item straight into his hand the same way (APrologueDirector's
+	// "Give hero an item" / "Hand an item over" actions); the function itself is unchanged.
 	void PickUp(AHolyItem* Item);
+
+protected:
 
 	// Bound to "Aim" (RMB) press/release — sets bIsAiming.
 	UFUNCTION(BlueprintCallable, Category = "Holy Items|Throw")

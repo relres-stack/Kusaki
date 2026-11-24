@@ -133,6 +133,157 @@ FString UPrologueAction_MonsterRole::Describe() const
 	return FString::Printf(TEXT("monster group '%s': %s"), *GroupName.ToString(), Role ? *Role->Describe() : TEXT("back to their own AI"));
 }
 
+namespace PrologueItems
+{
+	// The hero's held items of this type, right hand first.
+	TArray<AHolyItem*> HeldOfType(const ABaseCharacter& Hero, EHolyItemType Type)
+	{
+		TArray<AHolyItem*> Items;
+		for (AHolyItem* Item : { Hero.EquippedRightHand, Hero.EquippedLeftHand })
+		{
+			if (IsValid(Item) && Item->ItemType == Type)
+			{
+				Items.Add(Item);
+			}
+		}
+		return Items;
+	}
+
+	// Spawns an item of ItemClass into the hero's free hand through his own PickUp(). Fuel below 0 = its default.
+	// Null (and nothing left in the world) if both his hands are full.
+	AHolyItem* GiveTo(ABaseCharacter& Hero, TSubclassOf<AHolyItem> ItemClass, float Fuel, bool bLit)
+	{
+		UWorld* World = Hero.GetWorld();
+		if (!World || !ItemClass)
+		{
+			return nullptr;
+		}
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AHolyItem* Item = World->SpawnActor<AHolyItem>(ItemClass, Hero.GetActorTransform(), Params);
+		if (!IsValid(Item))
+		{
+			return nullptr;
+		}
+		// Before PickUp(): it lights the item only if there is fuel.
+		if (Fuel >= 0.0f)
+		{
+			Item->FuelRemaining = FMath::Min(Fuel, Item->MaxFuel);
+		}
+		Hero.PickUp(Item);
+		if (Hero.EquippedRightHand != Item && Hero.EquippedLeftHand != Item)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: %s has both hands full - %s not given"), *Hero.GetName(), *Item->GetName());
+			Item->Destroy();
+			return nullptr;
+		}
+		if (!bLit)
+		{
+			Item->Extinguish();
+		}
+		// Riding: a held item must not collide with the monster under her — what mounting does to held items.
+		if (Hero.IsMounted())
+		{
+			Item->DisableAllPhysicsAndCollision();
+		}
+		return Item;
+	}
+}
+
+void UPrologueAction_GiveItem::Execute(APrologueDirector& Director) const
+{
+	ABaseCharacter* Hero = Director.ResolveHero(HeroId);
+	if (!IsValid(Hero) || !ItemClass)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: '%s' skipped (no such hero or no item class)"), *Describe());
+		return;
+	}
+	if (const AHolyItem* Item = PrologueItems::GiveTo(*Hero, ItemClass, Fuel, bLit))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s now holds %s (fuel %.0f, %s)"), *Hero->GetName(), *Item->GetName(),
+			Item->FuelRemaining, Item->bIsLit ? TEXT("lit") : TEXT("unlit"));
+	}
+}
+
+FString UPrologueAction_GiveItem::Describe() const
+{
+	return FString::Printf(TEXT("%s gets %s%s%s"), HeroId.IsNone() ? TEXT("player's hero") : *HeroId.ToString(), *GetNameSafe(ItemClass),
+		Fuel >= 0.0f ? *FString::Printf(TEXT(", fuel %.0f"), Fuel) : TEXT(""), bLit ? TEXT(", lit") : TEXT(", unlit"));
+}
+
+void UPrologueAction_HandOverItem::Execute(APrologueDirector& Director) const
+{
+	ABaseCharacter* From = Director.ResolveHero(FromHeroId);
+	ABaseCharacter* To = Director.ResolveHero(ToHeroId);
+	if (!IsValid(From) || !IsValid(To) || From == To)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: '%s' skipped (hero missing)"), *Describe());
+		return;
+	}
+	const TArray<AHolyItem*> Items = PrologueItems::HeldOfType(*From, ItemType);
+	if (Items.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: '%s' skipped - %s holds no such item"), *Describe(), *From->GetName());
+		return;
+	}
+	AHolyItem* Given = Items[0];
+	const TSubclassOf<AHolyItem> ItemClass = Given->GetClass();
+	const float Fuel = Given->FuelRemaining;
+	const bool bWasLit = Given->bIsLit;
+	// Gone from the giver's hand: the hero's code checks his hands with IsValid(), so the hand counts as empty now.
+	Given->Destroy();
+	if (const AHolyItem* Taken = PrologueItems::GiveTo(*To, ItemClass, Fuel, bWasLit))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s handed %s to %s (fuel %.0f, %s)"), *From->GetName(), *GetNameSafe(ItemClass), *To->GetName(),
+			Taken->FuelRemaining, Taken->bIsLit ? TEXT("lit") : TEXT("unlit"));
+	}
+}
+
+FString UPrologueAction_HandOverItem::Describe() const
+{
+	return FString::Printf(TEXT("%s hands his %s to %s"), FromHeroId.IsNone() ? TEXT("player's hero") : *FromHeroId.ToString(),
+		ItemType == EHolyItemType::Censer ? TEXT("censer") : TEXT("candle"), ToHeroId.IsNone() ? TEXT("player's hero") : *ToHeroId.ToString());
+}
+
+void UPrologueAction_LightItem::Execute(APrologueDirector& Director) const
+{
+	ABaseCharacter* Hero = Director.ResolveHero(HeroId);
+	const TArray<AHolyItem*> Items = IsValid(Hero) ? PrologueItems::HeldOfType(*Hero, ItemType) : TArray<AHolyItem*>();
+	if (Items.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: '%s' skipped - no such item in his hands"), *Describe());
+		return;
+	}
+	for (AHolyItem* Item : Items)
+	{
+		if (bLight)
+		{
+			if (Fuel >= 0.0f)
+			{
+				Item->FuelRemaining = FMath::Min(Fuel, Item->MaxFuel);
+			}
+			Item->LightUp();
+			if (!Item->bIsLit)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Prologue: %s did not light - no fuel left (%.0f)"), *Item->GetName(), Item->FuelRemaining);
+			}
+		}
+		else
+		{
+			Item->Extinguish();
+		}
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s's %s is %s (fuel %.0f)"), *Hero->GetName(), *Item->GetName(),
+			Item->bIsLit ? TEXT("lit") : TEXT("out"), Item->FuelRemaining);
+	}
+}
+
+FString UPrologueAction_LightItem::Describe() const
+{
+	return FString::Printf(TEXT("%s %s his %s%s"), HeroId.IsNone() ? TEXT("player's hero") : *HeroId.ToString(),
+		bLight ? TEXT("lights") : TEXT("puts out"), ItemType == EHolyItemType::Censer ? TEXT("censer") : TEXT("candles"),
+		bLight && Fuel >= 0.0f ? *FString::Printf(TEXT(" (fuel set to %.0f)"), Fuel) : TEXT(""));
+}
+
 void UPrologueAction_KillHero::Execute(APrologueDirector& Director) const
 {
 	ABaseCharacter* Hero = Director.ResolveHero(HeroId);

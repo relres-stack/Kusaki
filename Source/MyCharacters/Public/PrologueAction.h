@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
 #include "HeroScriptCommand.h"
+#include "HolyItem.h"
 #include "PrologueMonsterRole.h"
 #include "PrologueAction.generated.h"
 
@@ -190,6 +191,90 @@ public:
 	// He faces the way the marker faces. Off: he keeps his own facing.
 	UPROPERTY(EditAnywhere, Category = "Action")
 	bool bUseMarkerRotation = true;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
+// A holy item straight into a hero's free hand (steps 2.10-2.11, and checkpoint setups: after a restart the Priest
+// must hold his censer again). Through the hero's own ABaseCharacter::PickUp(), as if he had picked it up; nothing
+// happens if both his hands are full.
+UCLASS(meta = (DisplayName = "Give hero an item"))
+class MYCHARACTERS_API UPrologueAction_GiveItem : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	// Who. Empty = the hero the player controls.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName HeroId;
+
+	// BP_Censer, BP_Candle...
+	UPROPERTY(EditAnywhere, Category = "Action")
+	TSubclassOf<AHolyItem> ItemClass;
+
+	// Oil / wax it has (clamped to its MaxFuel). Below 0 = the item's own default.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	float Fuel = -1.0f;
+
+	// Lit in his hand (if it has fuel). Off: he holds it unlit.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bLit = true;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
+// The item passes from one hero's hand to another's (step 2.10: the Priest gives the Rider his censer, scene 12a). The
+// hand-over itself is a staged scene; this is what happens in the game at its end: the giver's item is gone, the
+// taker holds the same kind of item with the same fuel, lit if it was lit (she swings a censer over her head as soon
+// as she holds one). The giver's hand is empty afterwards (the hero's code treats a removed item as an empty hand), so
+// no new function on the hero is needed.
+UCLASS(meta = (DisplayName = "Hand an item over (scene stand-in)"))
+class MYCHARACTERS_API UPrologueAction_HandOverItem : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	// The giver (empty = the hero the player controls).
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName FromHeroId = TEXT("Priest");
+
+	// The taker.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName ToHeroId = TEXT("Rider");
+
+	// Which of the giver's items (his right hand first).
+	UPROPERTY(EditAnywhere, Category = "Action")
+	EHolyItemType ItemType = EHolyItemType::Censer;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
+// Lights or puts out a hero's held item (step 2.11: the Priest gets up and lights his censer with little oil left).
+// Through AHolyItem::LightUp() / Extinguish(); an item with no fuel does not light (LightUp()'s own rule).
+UCLASS(meta = (DisplayName = "Light / put out a hero's item"))
+class MYCHARACTERS_API UPrologueAction_LightItem : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	// Who. Empty = the hero the player controls.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName HeroId;
+
+	// Which of his items: every held item of this type.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	EHolyItemType ItemType = EHolyItemType::Censer;
+
+	// On: light it. Off: put it out.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bLight = true;
+
+	// Before lighting, set its fuel to this (clamped to MaxFuel). Below 0 = keep what it has.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	float Fuel = -1.0f;
 
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;
