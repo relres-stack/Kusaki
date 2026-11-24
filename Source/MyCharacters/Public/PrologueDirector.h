@@ -18,6 +18,7 @@ class UPrologueScenarioData;
 class UScriptedKnockdownComponent;
 struct FPrologueAppearancePlacement;
 struct FPrologueHeroEntry;
+struct FPrologueStep;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPrologueHeroSwitched, FName, NewHeroId);
 
@@ -86,6 +87,18 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug")
 	FKey DebugSkipStepKey = EKeys::K;
+
+	// Debug (step 2.9): this key restarts the prologue from the last checkpoint (reloads the level).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug")
+	bool bDebugRestartKey = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug")
+	FKey DebugRestartKey = EKeys::L;
+
+	// Debug (step 2.9, part of 3.6): start the prologue at this step (1 = the first one) as if it were a checkpoint —
+	// its "Checkpoint Setup" runs, the steps before it do not. 0 = off. A checkpoint reached later still wins on a restart.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prologue|Debug", meta = (ClampMin = "0"))
+	int32 DebugStartStep = 0;
 
 	// Debug: after AppearHero() the candidate points stay drawn this long (green = chosen, red = allowed but
 	// hidden or worse, grey = outside the distance/angle limits). 0 = not drawn.
@@ -186,6 +199,11 @@ public:
 	// candle only inside its cone), so a role monster holds at the light's edge instead of walking into it.
 	FVector KeepOutOfHeroLight(const FVector& Goal, const ABaseMonster& Monster) const;
 
+	// Step 2.9: fades to black and reloads the level; the prologue then goes on from the last checkpoint reached
+	// (UPrologueCheckpointSubsystem), or from the beginning if there is none.
+	UFUNCTION(BlueprintCallable, Category = "Prologue")
+	void RestartFromCheckpoint();
+
 	// Fired after control has passed to another hero.
 	UPROPERTY(BlueprintAssignable, Category = "Prologue")
 	FOnPrologueHeroSwitched OnHeroSwitched;
@@ -248,6 +266,19 @@ private:
 	void BeginStep(int32 StepIndex);
 	void FireCurrentStep(bool bForcedByDebug);
 
+	// Step 2.9. Starts at StepIndex as a checkpoint: its CheckpointSetup runs, then the step waits. Why is for the log.
+	void StartFromStep(int32 StepIndex, const TCHAR* Why);
+
+	// The current step's failure condition: warning, then failure (FailActions), then the restart after RestartDelay.
+	// True while the step has failed — it no longer goes on.
+	bool TickFailCondition(const FPrologueStep& Step);
+
+	void ReloadLevel();
+	class UPrologueCheckpointSubsystem* GetCheckpoints() const;
+
+	// A line on screen for the player (the failure warning) — key 605, like the "Message" action; not debug-only.
+	static void ShowSubtitle(const FString& Text, float Seconds);
+
 	UFUNCTION()
 	void HandleHeroScriptFinished(UHeroScriptRunner* Runner, bool bInterrupted);
 
@@ -280,4 +311,16 @@ private:
 	int32 StepSerial = 0;
 	double StepStartTime = 0.0;
 	FTimerHandle StartRetryHandle;
+
+	// Step 2.9: the current step's failure state.
+	enum class EFailPhase : uint8 { None, Warning, Failed };
+	EFailPhase FailPhase = EFailPhase::None;
+	double FailPhaseStartTime = 0.0;
+
+	// Fading out before a reload (nothing else happens meanwhile).
+	bool bRestarting = false;
+	FTimerHandle RestartTimerHandle;
+
+	// For the readout: the last checkpoint reached (index), INDEX_NONE if none.
+	int32 LastCheckpointIndex = INDEX_NONE;
 };

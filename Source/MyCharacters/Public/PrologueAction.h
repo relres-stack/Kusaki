@@ -153,6 +153,48 @@ public:
 	virtual FString Describe() const override;
 };
 
+// A scripted death (step 2.9, usually in a step's "Fail Actions"): the hero dies right away (ABaseCharacter::
+// HandleDeath() — the usual ragdoll), whatever protects him (untouchable, lying after a scripted fall). His own script
+// stops. Step 12b: the Priest, left without light, dies; then the prologue restarts from the last checkpoint.
+UCLASS(meta = (DisplayName = "Hero dies (scripted)"))
+class MYCHARACTERS_API UPrologueAction_KillHero : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	// Who. Empty = the hero the player controls.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName HeroId;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
+// Puts a hero on a marker placed in the level (step 2.9, mostly in a checkpoint's "Checkpoint Setup"): an actor with
+// MarkerTag (a TargetPoint). A hero not in the level yet is spawned there under AI. Whatever he was walking to is
+// dropped (his script goes on with its next command).
+UCLASS(meta = (DisplayName = "Place hero at marker"))
+class MYCHARACTERS_API UPrologueAction_PlaceHero : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	// Who. Empty = the hero the player controls.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName HeroId;
+
+	// The marker: the first actor found with this tag.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName MarkerTag;
+
+	// He faces the way the marker faces. Off: he keeps his own facing.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bUseMarkerRotation = true;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
 // What "Monster group: do once" does (step 2.8b).
 UENUM(BlueprintType)
 enum class EPrologueMonsterGroupDo : uint8

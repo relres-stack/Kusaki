@@ -187,6 +187,101 @@ FString UPrologueTrigger_NoMonstersNear::DescribeCondition() const
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Heroes too far apart
+
+bool UPrologueTrigger_HeroesApart::GetAlongGoal(const APrologueDirector& Director, float& OutAhead) const
+{
+	const ABaseCharacter* A = Director.ResolveHero(HeroA);
+	const ABaseCharacter* B = Director.ResolveHero(HeroB);
+	if (GoalTag.IsNone() || !IsValid(A) || !IsValid(B))
+	{
+		return false;
+	}
+	TArray<AActor*> Goals;
+	UGameplayStatics::GetAllActorsWithTag(Director.GetWorld(), GoalTag, Goals);
+	const AActor* Goal = nullptr;
+	float BestDistSquared = TNumericLimits<float>::Max();
+	for (const AActor* Candidate : Goals)
+	{
+		const float DistSquared = IsValid(Candidate) ? FVector::DistSquared2D(Candidate->GetActorLocation(), B->GetActorLocation()) : BestDistSquared;
+		if (DistSquared < BestDistSquared)
+		{
+			BestDistSquared = DistSquared;
+			Goal = Candidate;
+		}
+	}
+	if (!Goal)
+	{
+		return false;
+	}
+	const FVector Direction = (Goal->GetActorLocation() - B->GetActorLocation()).GetSafeNormal2D();
+	FVector Offset = A->GetActorLocation() - B->GetActorLocation();
+	Offset.Z = 0.0f;
+	OutAhead = FVector::DotProduct(Offset, Direction);
+	return !Direction.IsNearlyZero();
+}
+
+bool UPrologueTrigger_HeroesApart::Check(const APrologueDirector& Director) const
+{
+	const ABaseCharacter* A = Director.ResolveHero(HeroA);
+	const ABaseCharacter* B = Director.ResolveHero(HeroB);
+	if (!IsValid(A) || !IsValid(B))
+	{
+		return false;
+	}
+	if (MaxDistance > 0.0f && FVector::Dist2D(A->GetActorLocation(), B->GetActorLocation()) > MaxDistance)
+	{
+		return true;
+	}
+	float Ahead = 0.0f;
+	if (GetAlongGoal(Director, Ahead))
+	{
+		if ((MaxAhead > 0.0f && Ahead > MaxAhead) || (MaxBehind > 0.0f && -Ahead > MaxBehind))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UPrologueTrigger_HeroesApart::DrawDebug(const APrologueDirector& Director) const
+{
+	const ABaseCharacter* A = Director.ResolveHero(HeroA);
+	const ABaseCharacter* B = Director.ResolveHero(HeroB);
+	if (!IsValid(A) || !IsValid(B))
+	{
+		return;
+	}
+	float Ahead = 0.0f;
+	const bool bAlong = GetAlongGoal(Director, Ahead);
+	const bool bMet = Check(Director);
+	const FVector Lift(0.0f, 0.0f, 60.0f);
+	DrawDebugLine(Director.GetWorld(), A->GetActorLocation() + Lift, B->GetActorLocation() + Lift, bMet ? FColor::Red : FColor::Green, false, -1.0f, 0, 3.0f);
+	const FString Text = FString::Printf(TEXT("%.1f m%s"), FVector::Dist2D(A->GetActorLocation(), B->GetActorLocation()) / 100.0f,
+		bAlong ? *FString::Printf(TEXT(", %s %.1f m"), Ahead >= 0.0f ? TEXT("ahead") : TEXT("behind"), FMath::Abs(Ahead) / 100.0f) : TEXT(""));
+	DrawDebugString(Director.GetWorld(), (A->GetActorLocation() + B->GetActorLocation()) * 0.5f + Lift, Text, nullptr, bMet ? FColor::Red : FColor::Green, 0.0f, true, 1.1f);
+}
+
+FString UPrologueTrigger_HeroesApart::DescribeCondition() const
+{
+	TArray<FString> Parts;
+	if (MaxDistance > 0.0f)
+	{
+		Parts.Add(FString::Printf(TEXT("farther than %.0f m"), MaxDistance / 100.0f));
+	}
+	if (!GoalTag.IsNone() && MaxAhead > 0.0f)
+	{
+		Parts.Add(FString::Printf(TEXT("more than %.0f m ahead toward '%s'"), MaxAhead / 100.0f, *GoalTag.ToString()));
+	}
+	if (!GoalTag.IsNone() && MaxBehind > 0.0f)
+	{
+		Parts.Add(FString::Printf(TEXT("more than %.0f m behind"), MaxBehind / 100.0f));
+	}
+	return FString::Printf(TEXT("%s and %s apart: %s"), *HeroName(HeroA), *HeroName(HeroB),
+		Parts.Num() > 0 ? *FString::Join(Parts, TEXT(" or ")) : TEXT("(no limit set)"));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Hero rides a monster of a group
 
 bool UPrologueTrigger_HeroRidesGroupMonster::Check(const APrologueDirector& Director) const

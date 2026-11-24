@@ -2,8 +2,12 @@
 
 #include "PrologueAction.h"
 
+#include "AIController.h"
 #include "Animation/AnimSequence.h"
 #include "BaseCharacter.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 #include "BaseMonster.h"
 #include "Components/HeroScriptRunner.h"
 #include "Components/ScriptedKnockdownComponent.h"
@@ -127,6 +131,72 @@ void UPrologueAction_MonsterRole::Execute(APrologueDirector& Director) const
 FString UPrologueAction_MonsterRole::Describe() const
 {
 	return FString::Printf(TEXT("monster group '%s': %s"), *GroupName.ToString(), Role ? *Role->Describe() : TEXT("back to their own AI"));
+}
+
+void UPrologueAction_KillHero::Execute(APrologueDirector& Director) const
+{
+	ABaseCharacter* Hero = Director.ResolveHero(HeroId);
+	if (!IsValid(Hero) || Hero->bIsDead)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: hero '%s' is not in the level or already dead - scripted death skipped"), *HeroId.ToString());
+		return;
+	}
+	if (UHeroScriptRunner* Runner = Hero->FindComponentByClass<UHeroScriptRunner>())
+	{
+		Runner->StopScript();
+	}
+	// HandleDeath() ignores every protection on purpose: this death is written in the scenario.
+	Hero->HandleDeath();
+}
+
+FString UPrologueAction_KillHero::Describe() const
+{
+	return FString::Printf(TEXT("%s dies (scripted)"), HeroId.IsNone() ? TEXT("player's hero") : *HeroId.ToString());
+}
+
+void UPrologueAction_PlaceHero::Execute(APrologueDirector& Director) const
+{
+	TArray<AActor*> Markers;
+	UGameplayStatics::GetAllActorsWithTag(Director.GetWorld(), MarkerTag, Markers);
+	const AActor* Marker = Markers.Num() > 0 ? Markers[0] : nullptr;
+	if (MarkerTag.IsNone() || !IsValid(Marker))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: no marker with tag '%s' in the level - '%s' skipped"), *MarkerTag.ToString(), *Describe());
+		return;
+	}
+
+	ABaseCharacter* Hero = Director.ResolveHero(HeroId);
+	if (!IsValid(Hero))
+	{
+		if (HeroId.IsNone())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: no player's hero to place at '%s'"), *MarkerTag.ToString());
+			return;
+		}
+		// Not in the level yet (a restart skipped the step he appears in): spawn him on the marker, a little above the
+		// ground so he does not start inside it.
+		const FRotator Facing = bUseMarkerRotation ? FRotator(0.0f, Marker->GetActorRotation().Yaw, 0.0f) : FRotator::ZeroRotator;
+		Director.SpawnHero(HeroId, FTransform(Facing, Marker->GetActorLocation() + FVector(0.0f, 0.0f, 100.0f)));
+		return;
+	}
+
+	if (AAIController* AI = Cast<AAIController>(Hero->GetController()))
+	{
+		AI->StopMovement();
+	}
+	const float HalfHeight = Hero->GetCapsuleComponent() ? Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 90.0f;
+	const FRotator Facing = bUseMarkerRotation ? FRotator(0.0f, Marker->GetActorRotation().Yaw, 0.0f) : Hero->GetActorRotation();
+	Hero->TeleportTo(Marker->GetActorLocation() + FVector(0.0f, 0.0f, HalfHeight + 5.0f), Facing);
+	if (APlayerController* PC = Cast<APlayerController>(Hero->GetController()))
+	{
+		PC->SetControlRotation(Facing);
+	}
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: %s placed at marker '%s'"), *Hero->GetName(), *MarkerTag.ToString());
+}
+
+FString UPrologueAction_PlaceHero::Describe() const
+{
+	return FString::Printf(TEXT("%s to marker '%s'"), HeroId.IsNone() ? TEXT("player's hero") : *HeroId.ToString(), *MarkerTag.ToString());
 }
 
 void UPrologueAction_MonsterGroupDo::Execute(APrologueDirector& Director) const

@@ -5,6 +5,7 @@
 #include "AIController.h"
 #include "BaseCharacter.h"
 #include "BaseMonster.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -21,9 +22,11 @@
 #include "NavigationSystem.h"
 #include "PrologueAction.h"
 #include "PrologueAppearance.h"
+#include "PrologueCheckpointSubsystem.h"
 #include "PrologueScenarioData.h"
 #include "PrologueTrigger.h"
 #include "TimerManager.h"
+#include "Engine/GameInstance.h"
 
 APrologueDirector::APrologueDirector()
 {
@@ -64,6 +67,14 @@ void APrologueDirector::TryStart()
 	// The opening scene owns the player's hero until it is Done (input, camera). Its own BeginPlay() may not
 	// have run yet on our first try (Idle), which is why "playing" is read as "enabled and not Done yet".
 	const bool bIntroRunning = IsValid(Intro) && Intro->bPlayOnBeginPlay && Intro->GetPhase() != EIntroPhase::Done;
+
+	// A restart from a checkpoint (step 2.9): black from the first frame until StartPrologue() fades back in, so the
+	// level is not seen in its starting state for a moment.
+	const UPrologueCheckpointSubsystem* Checkpoints = GetCheckpoints();
+	if (IsValid(PC) && PC->PlayerCameraManager && Checkpoints && Checkpoints->GetCheckpoint(Scenario) != INDEX_NONE)
+	{
+		PC->PlayerCameraManager->SetManualCameraFade(1.0f, FLinearColor::Black, false);
+	}
 
 	if (!IsValid(PlayerHero) || bIntroRunning)
 	{
@@ -107,7 +118,27 @@ void APrologueDirector::StartPrologue()
 
 	UE_LOG(LogTemp, Warning, TEXT("Prologue: started, %d hero(es), player controls '%s', %d step(s)"),
 		Heroes.Num(), *GetControlledHeroId().ToString(), Scenario->Steps.Num());
-	BeginStep(0);
+
+	// Step 2.9: after a restart go on from the last checkpoint; otherwise the debug start step, if set.
+	const UPrologueCheckpointSubsystem* Checkpoints = GetCheckpoints();
+	const int32 Checkpoint = Checkpoints ? Checkpoints->GetCheckpoint(Scenario) : INDEX_NONE;
+	if (Scenario->Steps.IsValidIndex(Checkpoint))
+	{
+		StartFromStep(Checkpoint, TEXT("restart from the last checkpoint"));
+		APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+		if (IsValid(PC) && PC->PlayerCameraManager)
+		{
+			PC->PlayerCameraManager->StartCameraFade(1.0f, 0.0f, Scenario->RestartFadeIn, FLinearColor::Black, false, false);
+		}
+	}
+	else if (DebugStartStep > 1 && Scenario->Steps.IsValidIndex(DebugStartStep - 1))
+	{
+		StartFromStep(DebugStartStep - 1, TEXT("debug start step"));
+	}
+	else
+	{
+		BeginStep(0);
+	}
 	SetActorTickEnabled(true);
 }
 
@@ -116,6 +147,28 @@ void APrologueDirector::BeginStep(int32 StepIndex)
 	CurrentStepIndex = StepIndex;
 	++StepSerial;
 	StepStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (FailPhase == EFailPhase::Warning)
+	{
+		ShowSubtitle(FString(), 0.1f);   // the step went on in time: its warning goes too
+	}
+	FailPhase = EFailPhase::None;
+
+	// Step 2.9: a checkpoint is remembered the moment it starts waiting; the whole prologue done = start over next time.
+	if (UPrologueCheckpointSubsystem* Checkpoints = GetCheckpoints())
+	{
+		if (Scenario && Scenario->Steps.IsValidIndex(StepIndex) && Scenario->Steps[StepIndex].bCheckpoint)
+		{
+			Checkpoints->SetCheckpoint(Scenario, StepIndex);
+			LastCheckpointIndex = StepIndex;
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: checkpoint - step %d '%s'"), StepIndex + 1, *Scenario->Steps[StepIndex].Name);
+			ShowDebug(604, 3.0f, FColor::Green, FString::Printf(TEXT("Prologue: checkpoint - step %d"), StepIndex + 1));
+		}
+		else if (Scenario && StepIndex == Scenario->Steps.Num())
+		{
+			Checkpoints->ClearCheckpoint();
+			LastCheckpointIndex = INDEX_NONE;
+		}
+	}
 
 	if (Scenario && Scenario->Steps.IsValidIndex(StepIndex))
 	{
@@ -135,7 +188,15 @@ void APrologueDirector::TickSteps()
 	{
 		return;
 	}
+	if (bRestarting)
+	{
+		return;
+	}
 	const FPrologueStep& Step = Scenario->Steps[CurrentStepIndex];
+	if (TickFailCondition(Step))
+	{
+		return;
+	}
 	if (IsValid(Step.Trigger))
 	{
 		Step.Trigger->Update(*this);
@@ -143,6 +204,131 @@ void APrologueDirector::TickSteps()
 	if (!IsValid(Step.Trigger) || Step.Trigger->IsMet(*this))
 	{
 		FireCurrentStep(false);
+	}
+}
+
+bool APrologueDirector::TickFailCondition(const FPrologueStep& Step)
+{
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (FailPhase == EFailPhase::Failed)
+	{
+		if (Now >= FailPhaseStartTime + Step.RestartDelay)
+		{
+			RestartFromCheckpoint();
+		}
+		return true;
+	}
+	if (!IsValid(Step.FailCondition))
+	{
+		return false;
+	}
+
+	Step.FailCondition->Update(*this);
+	if (!Step.FailCondition->IsMet(*this))
+	{
+		if (FailPhase == EFailPhase::Warning)
+		{
+			FailPhase = EFailPhase::None;
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: step %d - back in time, no failure"), CurrentStepIndex + 1);
+			ShowSubtitle(FString(), 0.1f);
+		}
+		return false;
+	}
+
+	if (FailPhase == EFailPhase::None)
+	{
+		FailPhase = EFailPhase::Warning;
+		FailPhaseStartTime = Now;
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: step %d - failing in %.1f s: %s"), CurrentStepIndex + 1, Step.FailAfter, *Step.FailCondition->Describe());
+		if (!Step.FailWarning.IsEmpty())
+		{
+			ShowSubtitle(Step.FailWarning.ToString(), Step.FailAfter + 1.0f);
+		}
+	}
+	if (Now - FailPhaseStartTime < Step.FailAfter)
+	{
+		return false;
+	}
+
+	FailPhase = EFailPhase::Failed;
+	FailPhaseStartTime = Now;
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: step %d '%s' FAILED (%s) - restart in %.1f s"), CurrentStepIndex + 1, *Step.Name,
+		*Step.FailCondition->Describe(), Step.RestartDelay);
+	ShowDebug(604, Step.RestartDelay + 1.0f, FColor::Red, FString::Printf(TEXT("Prologue: step %d FAILED - restart from the checkpoint"), CurrentStepIndex + 1));
+	for (const UPrologueAction* Action : Step.FailActions)
+	{
+		if (IsValid(Action))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Prologue:   ! %s"), *Action->Describe());
+			Action->Execute(*this);
+		}
+	}
+	return true;
+}
+
+void APrologueDirector::StartFromStep(int32 StepIndex, const TCHAR* Why)
+{
+	const FPrologueStep& Step = Scenario->Steps[StepIndex];
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: %s - step %d '%s', its checkpoint setup: %d action(s)"), Why, StepIndex + 1, *Step.Name,
+		Step.CheckpointSetup.Num());
+	ShowDebug(604, 5.0f, FColor::Yellow, FString::Printf(TEXT("Prologue: %s - step %d"), Why, StepIndex + 1));
+	for (const UPrologueAction* Action : Step.CheckpointSetup)
+	{
+		if (IsValid(Action))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Prologue:   + %s"), *Action->Describe());
+			Action->Execute(*this);
+		}
+	}
+	BeginStep(StepIndex);
+}
+
+void APrologueDirector::RestartFromCheckpoint()
+{
+	if (bRestarting)
+	{
+		return;
+	}
+	bRestarting = true;
+
+	UPrologueCheckpointSubsystem* Checkpoints = GetCheckpoints();
+	if (Checkpoints)
+	{
+		Checkpoints->NoteRestart();
+	}
+	const int32 Checkpoint = Checkpoints ? Checkpoints->GetCheckpoint(Scenario) : INDEX_NONE;
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: restart - %s"), Checkpoint != INDEX_NONE
+		? *FString::Printf(TEXT("from the checkpoint, step %d"), Checkpoint + 1) : TEXT("no checkpoint reached, from the beginning"));
+
+	const float FadeOut = Scenario ? Scenario->RestartFadeOut : 1.0f;
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (IsValid(PC) && PC->PlayerCameraManager)
+	{
+		PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, FadeOut, FLinearColor::Black, false, true);
+	}
+	GetWorldTimerManager().SetTimer(RestartTimerHandle, this, &APrologueDirector::ReloadLevel, FMath::Max(FadeOut, 0.05f), false);
+}
+
+void APrologueDirector::ReloadLevel()
+{
+	// The same way ABaseMonster::ReloadLevelAfterDeath() reloads after a catch.
+	if (UWorld* World = GetWorld())
+	{
+		UGameplayStatics::OpenLevel(this, FName(*World->GetName()));
+	}
+}
+
+UPrologueCheckpointSubsystem* APrologueDirector::GetCheckpoints() const
+{
+	const UGameInstance* GameInstance = GetGameInstance();
+	return GameInstance ? GameInstance->GetSubsystem<UPrologueCheckpointSubsystem>() : nullptr;
+}
+
+void APrologueDirector::ShowSubtitle(const FString& Text, float Seconds)
+{
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(605, Seconds, FColor::White, Text);
 	}
 }
 
@@ -1219,6 +1405,11 @@ void APrologueDirector::TickDebug()
 		}
 	}
 
+	if (bDebugRestartKey && DebugRestartKey.IsValid() && PC->WasInputKeyJustPressed(DebugRestartKey))
+	{
+		RestartFromCheckpoint();
+	}
+
 	if (bDebugSkipStepKey && DebugSkipStepKey.IsValid() && PC->WasInputKeyJustPressed(DebugSkipStepKey))
 	{
 		if (Scenario->Steps.IsValidIndex(CurrentStepIndex))
@@ -1267,6 +1458,26 @@ void APrologueDirector::TickDebug()
 			}
 			FString StepLine = FString::Printf(TEXT("Prologue step %d/%d '%s' (%.0f s) waits for: %s"), CurrentStepIndex + 1,
 				Scenario->Steps.Num(), *Step.Name, GetStepElapsedTime(), *Waiting);
+			// Step 2.9: failure state and the checkpoint a restart goes back to.
+			if (IsValid(Step.FailCondition))
+			{
+				const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+				if (FailPhase == EFailPhase::Warning)
+				{
+					StepLine += FString::Printf(TEXT(" | FAILING in %.1f s"), FMath::Max(0.0, Step.FailAfter - (Now - FailPhaseStartTime)));
+				}
+				else if (FailPhase == EFailPhase::Failed)
+				{
+					StepLine += TEXT(" | FAILED - restarting");
+				}
+				else
+				{
+					StepLine += TEXT(" | fails if: ") + Step.FailCondition->Describe();
+				}
+				Step.FailCondition->DrawDebug(*this);
+			}
+			StepLine += LastCheckpointIndex != INDEX_NONE
+				? FString::Printf(TEXT(" | checkpoint: step %d"), LastCheckpointIndex + 1) : FString(TEXT(" | no checkpoint yet"));
 			if (bDebugSkipStepKey)
 			{
 				StepLine += FString::Printf(TEXT(" | %s: fire it now"), *DebugSkipStepKey.GetDisplayName().ToString());

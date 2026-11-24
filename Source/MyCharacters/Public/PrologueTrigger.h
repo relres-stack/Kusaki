@@ -148,6 +148,50 @@ protected:
 	virtual FString DescribeCondition() const override;
 };
 
+// Two heroes are too far apart (step 2.9, a "Failure" condition): farther than MaxDistance, or — along the way to a
+// goal marker — hero A is more than MaxAhead in front of hero B or more than MaxBehind behind him. Step 12b: the Rider
+// must neither ride off ahead nor fall behind the Priest, or he is left without light.
+UCLASS(meta = (DisplayName = "Heroes too far apart"))
+class MYCHARACTERS_API UPrologueTrigger_HeroesApart : public UPrologueTrigger
+{
+	GENERATED_BODY()
+
+public:
+	// The one who must keep close (empty = the hero the player controls).
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	FName HeroA = TEXT("Rider");
+
+	// The one A must stay with.
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	FName HeroB = TEXT("Priest");
+
+	// Flat distance between them, cm. 0 = not checked.
+	UPROPERTY(EditAnywhere, Category = "Trigger", meta = (ClampMin = "0.0"))
+	float MaxDistance = 0.0f;
+
+	// Where they are going: actors with this tag, the one nearest to B. None = no ahead/behind check.
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	FName GoalTag;
+
+	// A is farther than this ahead of B toward the goal, cm. 0 = not checked.
+	UPROPERTY(EditAnywhere, Category = "Trigger", meta = (ClampMin = "0.0"))
+	float MaxAhead = 0.0f;
+
+	// A is farther than this behind B, cm. 0 = not checked.
+	UPROPERTY(EditAnywhere, Category = "Trigger", meta = (ClampMin = "0.0"))
+	float MaxBehind = 0.0f;
+
+	virtual void DrawDebug(const APrologueDirector& Director) const override;
+
+protected:
+	virtual bool Check(const APrologueDirector& Director) const override;
+	virtual FString DescribeCondition() const override;
+
+private:
+	// How far A is ahead of B toward the goal (negative = behind). False if there is no goal or no hero.
+	bool GetAlongGoal(const APrologueDirector& Director, float& OutAhead) const;
+};
+
 // The hero rides a monster of a group (step 2.8c): "the Rider has mounted the monster sitting on the Priest" (step 12).
 // The monster leaves its group the moment it is ridden; the director remembers where it came from.
 UCLASS(meta = (DisplayName = "Hero rides a monster of a group"))
