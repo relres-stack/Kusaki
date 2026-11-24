@@ -191,6 +191,20 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0.0"))
 	float CameraBlendOut = 1.0f;
 
+	// Seconds the view glides from the player's camera into the scene's first shot. 0 = a straight cut. (Leave "Can
+	// Blend"/ease-in off on the scene's camera cuts: the director does this glide.)
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0.0"))
+	float CameraBlendIn = 1.0f;
+
+	// Step 3.2: first the player's hero walks by himself (input blocked) to the actor with this tag and turns the way it
+	// faces, then the scene starts — it needs him exactly there. None = the scene starts wherever he is.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName PlayerMarkTag;
+
+	// Seconds he may walk to the mark; not there by then = he is put on it.
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0.5"))
+	float MaxWalkTime = 6.0f;
+
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;
 };

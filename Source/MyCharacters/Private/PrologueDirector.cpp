@@ -25,6 +25,7 @@
 #include "LevelSequencePlayer.h"
 #include "MovieScene.h"
 #include "Kismet/GameplayStatics.h"
+#include "NavigationPath.h"
 #include "NavigationSystem.h"
 #include "PrologueAction.h"
 #include "PrologueAppearance.h"
@@ -38,6 +39,9 @@ APrologueDirector::APrologueDirector()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;   // ticks only once the prologue runs (debug key, readout)
+	// After a scene's evaluation (pre-physics) and before the camera is updated: the glide into a scene replaces its
+	// first cut in the same frame, so the first shot never flashes.
+	PrimaryActorTick.TickGroup = TG_PostPhysics;
 	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
 }
 
@@ -315,18 +319,166 @@ void APrologueDirector::RestartFromCheckpoint()
 	GetWorldTimerManager().SetTimer(RestartTimerHandle, this, &APrologueDirector::ReloadLevel, FMath::Max(FadeOut, 0.05f), false);
 }
 
-bool APrologueDirector::PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput, bool bHideHud, float HoldMonstersRadius, FName SwitchControlAtEnd,
-	float CameraBlendOut)
+bool APrologueDirector::PlayScene(ULevelSequence* Scene, const FPrologueSceneOptions& Options)
 {
-	UWorld* World = GetWorld();
-	if (!World || !IsValid(Scene))
+	if (!GetWorld() || !IsValid(Scene))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Prologue: no scene to play"));
 		return false;
 	}
-	if (bScenePlaying)
+	if (bScenePlaying || bScenePreparing)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Prologue: scene '%s' not started - '%s' is still playing"), *Scene->GetName(), *GetNameSafe(CurrentScene));
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: scene '%s' not started - '%s' is still playing"), *Scene->GetName(),
+			*GetNameSafe(bScenePreparing ? PendingScene.Get() : CurrentScene.Get()));
+		return false;
+	}
+	SceneOptions = Options;
+
+	// Step 3.2: the scene needs the player's hero exactly on his mark — he walks there himself first, input blocked.
+	if (!Options.PlayerMarkTag.IsNone())
+	{
+		APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+		ABaseCharacter* Hero = IsValid(PC) ? Cast<ABaseCharacter>(PC->GetPawn()) : nullptr;
+		TArray<AActor*> Marks;
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), Options.PlayerMarkTag, Marks);
+		if (IsValid(Hero) && Marks.Num() > 0 && IsValid(Marks[0]))
+		{
+			PendingScene = Scene;
+			bScenePreparing = true;
+			bMarkTurning = false;
+			MarkGoal = Marks[0]->GetActorLocation();
+			MarkYaw = Marks[0]->GetActorRotation().Yaw;
+			MarkStartTime = GetWorld()->GetTimeSeconds();
+			MarkPath.Reset();
+			MarkPathIndex = 0;
+			if (const UNavigationPath* Path = UNavigationSystemV1::FindPathToLocationSynchronously(GetWorld(), Hero->GetActorLocation(), MarkGoal, Hero))
+			{
+				if (Path->IsValid())
+				{
+					MarkPath = Path->PathPoints;
+				}
+			}
+			if (MarkPath.Num() == 0)
+			{
+				MarkPath.Add(MarkGoal);   // no navmesh path: straight to it
+			}
+			PC->SetIgnoreMoveInput(true);
+			PC->SetIgnoreLookInput(true);
+			Hero->SetAimSuppressed(true);
+			UpdateAllHeroProtection();
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: scene '%s' - %s walks to mark '%s' first (%.1f m, %d path point(s))"), *Scene->GetName(),
+				*Hero->GetName(), *Options.PlayerMarkTag.ToString(), FVector::Dist2D(Hero->GetActorLocation(), MarkGoal) / 100.0f, MarkPath.Num());
+			return true;
+		}
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: scene '%s' - no mark with tag '%s' (or no player's hero), it starts where he is"),
+			*Scene->GetName(), *Options.PlayerMarkTag.ToString());
+	}
+	return StartScenePlayback(Scene);
+}
+
+void APrologueDirector::TickSceneMark(float DeltaSeconds)
+{
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	ABaseCharacter* Hero = IsValid(PC) ? Cast<ABaseCharacter>(PC->GetPawn()) : nullptr;
+	if (!IsValid(Hero) || Hero->bIsDead)
+	{
+		FinishSceneMark(false);
+		return;
+	}
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (Now - MarkStartTime > SceneOptions.MaxWalkTime)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s did not reach his mark in %.1f s - put there"), *Hero->GetName(), SceneOptions.MaxWalkTime);
+		FinishSceneMark(true);
+		return;
+	}
+
+	const FVector Location = Hero->GetActorLocation();
+	if (!bMarkTurning)
+	{
+		const float ToGoal = FVector::Dist2D(Location, MarkGoal);
+		if (ToGoal > 30.0f)
+		{
+			// Along the navmesh path, the next point not reached yet; slowing down in the last metre so he does not
+			// overshoot. bForce: his move input is blocked for the player, not for this.
+			while (MarkPathIndex < MarkPath.Num() - 1 && FVector::Dist2D(Location, MarkPath[MarkPathIndex]) < 60.0f)
+			{
+				++MarkPathIndex;
+			}
+			FVector Direction = MarkPath[MarkPathIndex] - Location;
+			Direction.Z = 0.0f;
+			if (Direction.Normalize())
+			{
+				Hero->AddMovementInput(Direction, FMath::Clamp(ToGoal / 100.0f, 0.3f, 1.0f), true);
+			}
+			// The camera follows behind him while he walks (the player's look input is off), not left looking sideways.
+			const FRotator Control = PC->GetControlRotation();
+			const float FollowYaw = FMath::FInterpTo(0.0f, FMath::FindDeltaAngleDegrees(Control.Yaw, Hero->GetActorRotation().Yaw), DeltaSeconds, 3.0f);
+			PC->SetControlRotation(FRotator(Control.Pitch, Control.Yaw + FollowYaw, 0.0f));
+			return;
+		}
+		// There: exactly on the mark (a few centimetres, not seen), then the turn.
+		if (UCharacterMovementComponent* Move = Hero->GetCharacterMovement())
+		{
+			Move->StopMovementImmediately();
+		}
+		Hero->SetActorLocation(FVector(MarkGoal.X, MarkGoal.Y, Location.Z));
+		bMarkTurning = true;
+	}
+
+	// Turning the way the mark faces, the camera with him.
+	const float Yaw = Hero->GetActorRotation().Yaw;
+	const float Delta = FMath::FindDeltaAngleDegrees(Yaw, MarkYaw);
+	if (FMath::Abs(Delta) <= 2.0f)
+	{
+		FinishSceneMark(false);
+		return;
+	}
+	const float Step = FMath::Clamp(Delta, -360.0f * DeltaSeconds, 360.0f * DeltaSeconds);
+	Hero->SetActorRotation(FRotator(0.0f, Yaw + Step, 0.0f));
+	PC->SetControlRotation(FRotator(PC->GetControlRotation().Pitch, Yaw + Step, 0.0f));
+}
+
+void APrologueDirector::FinishSceneMark(bool bPutOnMark)
+{
+	if (!bScenePreparing)
+	{
+		return;
+	}
+	bScenePreparing = false;
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	ABaseCharacter* Hero = IsValid(PC) ? Cast<ABaseCharacter>(PC->GetPawn()) : nullptr;
+	if (IsValid(Hero))
+	{
+		const FRotator Facing(0.0f, MarkYaw, 0.0f);
+		if (bPutOnMark)
+		{
+			const float HalfHeight = Hero->GetCapsuleComponent() ? Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 90.0f;
+			Hero->TeleportTo(MarkGoal + FVector(0.0f, 0.0f, HalfHeight + 5.0f), Facing);
+		}
+		else
+		{
+			Hero->SetActorRotation(Facing);
+		}
+		PC->SetControlRotation(FRotator(PC->GetControlRotation().Pitch, MarkYaw, 0.0f));
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s on his mark at %s, facing %.0f"), *Hero->GetName(), *Hero->GetActorLocation().ToCompactString(), MarkYaw);
+	}
+	if (IsValid(PC))
+	{
+		PC->SetIgnoreMoveInput(false);
+		PC->SetIgnoreLookInput(false);
+	}
+	ULevelSequence* Scene = PendingScene;
+	PendingScene = nullptr;
+	StartScenePlayback(Scene);
+}
+
+bool APrologueDirector::StartScenePlayback(ULevelSequence* Scene)
+{
+	UWorld* World = GetWorld();
+	if (!World || !IsValid(Scene))
+	{
+		UpdateAllHeroProtection();
 		return false;
 	}
 
@@ -337,9 +489,9 @@ bool APrologueDirector::PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput,
 	}
 
 	FMovieSceneSequencePlaybackSettings Settings;
-	Settings.bDisableMovementInput = bBlockPlayerInput;
-	Settings.bDisableLookAtInput = bBlockPlayerInput;
-	Settings.bHideHud = bHideHud;
+	Settings.bDisableMovementInput = SceneOptions.bBlockInput;
+	Settings.bDisableLookAtInput = SceneOptions.bBlockInput;
+	Settings.bHideHud = SceneOptions.bHideHud;
 	// Decision 10: after the scene everyone stays where the scene left them, the game goes on from there.
 	Settings.FinishCompletionStateOverride = EMovieSceneCompletionModeOverride::ForceKeepState;
 
@@ -367,8 +519,6 @@ bool APrologueDirector::PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput,
 	SceneActor = Actor;
 	ScenePlayer = Player;
 	CurrentScene = Scene;
-	SceneSwitchControlAtEnd = SwitchControlAtEnd;
-	SceneCameraBlendOut = CameraBlendOut;
 	// Played again: "Scene finished" waits for this run's end, not the previous one.
 	FinishedScenes.Remove(FSoftObjectPath(Scene));
 	bHasScenePOV = false;
@@ -390,7 +540,7 @@ bool APrologueDirector::PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput,
 		{
 			AI->StopMovement();
 		}
-		if (Hero->IsPlayerControlled() && bBlockPlayerInput)
+		if (Hero->IsPlayerControlled() && SceneOptions.bBlockInput)
 		{
 			Hero->SetAimSuppressed(true);
 		}
@@ -400,13 +550,13 @@ bool APrologueDirector::PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput,
 	// keep it — a step put them there for this scene.
 	SceneHeldMonsters.Reset();
 	const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
-	if (HoldMonstersRadius > 0.0f && IsValid(PlayerPawn))
+	if (SceneOptions.HoldMonstersRadius > 0.0f && IsValid(PlayerPawn))
 	{
 		for (TActorIterator<ABaseMonster> It(World); It; ++It)
 		{
 			ABaseMonster* Monster = *It;
 			if (IsValid(Monster) && Monster->Health > 0.0f && !Monster->IsScriptControlled() && !Monster->bIsBeingRidden
-				&& FVector::Dist2D(Monster->GetActorLocation(), PlayerPawn->GetActorLocation()) <= HoldMonstersRadius)
+				&& FVector::Dist2D(Monster->GetActorLocation(), PlayerPawn->GetActorLocation()) <= SceneOptions.HoldMonstersRadius)
 			{
 				Monster->SetScriptControlled(true);
 				SceneHeldMonsters.Add(Monster);
@@ -414,6 +564,19 @@ bool APrologueDirector::PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput,
 		}
 	}
 	UpdateAllHeroProtection();
+
+	// Step 3.4 (into the scene): the player's view right now, to glide from it once the scene takes the camera.
+	bBlendInPending = false;
+	if (SceneOptions.CameraBlendIn > 0.0f)
+	{
+		const APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+		if (IsValid(PC) && PC->PlayerCameraManager)
+		{
+			SceneStartPOV = PC->PlayerCameraManager->GetCameraCacheView();
+			bBlendInPending = true;
+			BlendInGiveUpTime = World->GetTimeSeconds() + 0.5;
+		}
+	}
 
 	Player->OnFinished.AddDynamic(this, &APrologueDirector::HandleSceneFinished);
 	Player->Play();
@@ -427,7 +590,7 @@ bool APrologueDirector::PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput,
 	}
 	UE_LOG(LogTemp, Warning, TEXT("Prologue: scene '%s' plays (%.1f s), heroes bound: %s, monsters held: %d%s"), *Scene->GetName(),
 		Player->GetDuration().AsSeconds(), BoundNames.Num() > 0 ? *FString::Join(BoundNames, TEXT(", ")) : TEXT("none"), SceneHeldMonsters.Num(),
-		SwitchControlAtEnd.IsNone() ? TEXT("") : *FString::Printf(TEXT(", control to %s at the end"), *SwitchControlAtEnd.ToString()));
+		SceneOptions.SwitchControlAtEnd.IsNone() ? TEXT("") : *FString::Printf(TEXT(", control to %s at the end"), *SceneOptions.SwitchControlAtEnd.ToString()));
 	ShowDebug(604, 3.0f, FColor::Yellow, FString::Printf(TEXT("Prologue: scene '%s'"), *Scene->GetName()));
 	return true;
 }
@@ -494,9 +657,9 @@ void APrologueDirector::EndScene(bool bSkipped)
 	GetWorldTimerManager().SetTimer(AfterSceneLog, FTimerDelegate::CreateWeakLambda(this, [LogHeroes]() { LogHeroes(TEXT("end + 0.5 s")); }), 0.5f, false);
 
 	// Step 3.4: the next hero takes over where the scene ends...
-	if (!SceneSwitchControlAtEnd.IsNone())
+	if (!SceneOptions.SwitchControlAtEnd.IsNone())
 	{
-		SwitchControlTo(SceneSwitchControlAtEnd);
+		SwitchControlTo(SceneOptions.SwitchControlAtEnd);
 	}
 	UpdateAllHeroProtection();
 
@@ -504,7 +667,7 @@ void APrologueDirector::EndScene(bool bSkipped)
 	// camera stands exactly where the shot was, then the engine blends from it to the hero.
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
 	APawn* PlayerPawn = IsValid(PC) ? PC->GetPawn() : nullptr;
-	if (SceneCameraBlendOut > 0.0f && bHasScenePOV && IsValid(PlayerPawn))
+	if (SceneOptions.CameraBlendOut > 0.0f && bHasScenePOV && IsValid(PlayerPawn))
 	{
 		if (IsValid(SceneBlendCamera))
 		{
@@ -522,7 +685,7 @@ void APrologueDirector::EndScene(bool bSkipped)
 				Camera->SetConstraintAspectRatio(false);
 			}
 			PC->SetViewTarget(SceneBlendCamera);
-			PC->SetViewTargetWithBlend(PlayerPawn, SceneCameraBlendOut, VTBlend_EaseInOut, 2.0f, false);
+			PC->SetViewTargetWithBlend(PlayerPawn, SceneOptions.CameraBlendOut, VTBlend_EaseInOut, 2.0f, false);
 			TWeakObjectPtr<ACameraActor> WeakCamera = SceneBlendCamera;
 			GetWorldTimerManager().SetTimer(SceneBlendCleanupHandle, FTimerDelegate::CreateWeakLambda(this, [WeakCamera]()
 			{
@@ -530,8 +693,8 @@ void APrologueDirector::EndScene(bool bSkipped)
 				{
 					WeakCamera->Destroy();
 				}
-			}), SceneCameraBlendOut + 0.2f, false);
-			UE_LOG(LogTemp, Warning, TEXT("Prologue: camera glides from the scene's last shot to %s (%.1f s)"), *PlayerPawn->GetName(), SceneCameraBlendOut);
+			}), SceneOptions.CameraBlendOut + 0.2f, false);
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: camera glides from the scene's last shot to %s (%.1f s)"), *PlayerPawn->GetName(), SceneOptions.CameraBlendOut);
 		}
 	}
 }
@@ -1108,6 +1271,53 @@ void APrologueDirector::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	// Step 3.2: the player's hero walking to his mark before a scene.
+	if (bScenePreparing)
+	{
+		TickSceneMark(DeltaSeconds);
+	}
+
+	// Step 3.4, into the scene: as soon as the scene has cut to its camera, a temporary camera stands where the player's
+	// view was and the view glides from it to the scene's camera (the scene's own cut handler sees it already blending
+	// there and leaves the transition alone).
+	if (bScenePlaying && bBlendInPending)
+	{
+		APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+		AActor* SceneCamera = IsValid(PC) ? PC->GetViewTarget() : nullptr;
+		if (IsValid(SceneCamera) && SceneCamera != PC->GetPawn())
+		{
+			bBlendInPending = false;
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			Params.ObjectFlags |= RF_Transient;
+			ACameraActor* From = GetWorld()->SpawnActor<ACameraActor>(SceneStartPOV.Location, SceneStartPOV.Rotation, Params);
+			if (IsValid(From))
+			{
+				if (UCameraComponent* Camera = From->GetCameraComponent())
+				{
+					Camera->SetFieldOfView(SceneStartPOV.FOV);
+					Camera->SetConstraintAspectRatio(false);
+				}
+				PC->SetViewTarget(From);
+				PC->SetViewTargetWithBlend(SceneCamera, SceneOptions.CameraBlendIn, VTBlend_EaseInOut, 2.0f, false);
+				TWeakObjectPtr<ACameraActor> WeakFrom = From;
+				FTimerHandle Cleanup;
+				GetWorldTimerManager().SetTimer(Cleanup, FTimerDelegate::CreateWeakLambda(this, [WeakFrom]()
+				{
+					if (WeakFrom.IsValid())
+					{
+						WeakFrom->Destroy();
+					}
+				}), SceneOptions.CameraBlendIn + 0.2f, false);
+				UE_LOG(LogTemp, Warning, TEXT("Prologue: camera glides into the scene's first shot (%.1f s)"), SceneOptions.CameraBlendIn);
+			}
+		}
+		else if (GetWorld()->GetTimeSeconds() > BlendInGiveUpTime)
+		{
+			bBlendInPending = false;   // the scene has no camera of its own
+		}
+	}
+
 	// Step 3.4: remember what the scene's camera shows, for the glide back to the hero when it ends.
 	if (bScenePlaying)
 	{
@@ -1589,7 +1799,7 @@ void APrologueDirector::UpdateHeroProtection(ABaseCharacter* Hero, FName HeroId)
 	const bool bUnderAI = !Hero->IsPlayerControlled();
 	const bool bLying = IsValid(Knockdown) && Knockdown->IsUntouchableWhileDown();
 	const bool bByStep = UntouchableHeroIds.Contains(HeroId);
-	const bool bInScene = bScenePlaying;   // stage 3: nobody gets hurt while a scene plays
+	const bool bInScene = bScenePlaying || bScenePreparing;   // stage 3: nobody gets hurt while a scene plays (or is prepared)
 	const bool bWanted = bUnderAI || bLying || bByStep || bInScene;
 	if (Hero->IsUntouchableByMonsters() == bWanted)
 	{
@@ -1661,6 +1871,11 @@ void APrologueDirector::TickDebug()
 		}
 		EndScene(true);
 	}
+	else if (bDebugSkipStepKey && DebugSkipStepKey.IsValid() && PC->WasInputKeyJustPressed(DebugSkipStepKey) && bScenePreparing)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: walk to the scene mark skipped (debug)"));
+		FinishSceneMark(true);
+	}
 	else if (bDebugSkipStepKey && DebugSkipStepKey.IsValid() && PC->WasInputKeyJustPressed(DebugSkipStepKey))
 	{
 		if (Scenario->Steps.IsValidIndex(CurrentStepIndex))
@@ -1726,6 +1941,12 @@ void APrologueDirector::TickDebug()
 					StepLine += TEXT(" | fails if: ") + Step.FailCondition->Describe();
 				}
 				Step.FailCondition->DrawDebug(*this);
+			}
+			if (bScenePreparing)
+			{
+				const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+				StepLine += FString::Printf(TEXT(" | SCENE '%s' prepares: walking to mark '%s' (%.1f m)"), *GetNameSafe(PendingScene),
+					*SceneOptions.PlayerMarkTag.ToString(), IsValid(PlayerPawn) ? FVector::Dist2D(PlayerPawn->GetActorLocation(), MarkGoal) / 100.0f : 0.0f);
 			}
 			if (bScenePlaying && IsValid(ScenePlayer))
 			{

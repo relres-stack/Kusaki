@@ -7,6 +7,7 @@
 #include "Camera/CameraTypes.h"
 #include "InputCoreTypes.h"
 #include "PrologueMonsterRole.h"
+#include "PrologueScene.h"
 #include "PrologueDirector.generated.h"
 
 class AAIController;
@@ -206,20 +207,23 @@ public:
 	// Stage 3 (steps 3.1, 3.3, basic 3.4): plays a staged scene — a Level Sequence shot on the level's own spots. Its
 	// tracks are bound to the REAL heroes by tag: a binding tagged "Priest" in the sequence moves this level's Priest
 	// (ALevelSequenceActor::SetBindingByTag), so after the scene every hero stays where the scene left him (Keep State)
-	// and the game goes on from there. While it plays: the player's input and aim are blocked (bBlockPlayerInput), heroes
+	// and the game goes on from there. While it plays: the player's input and aim are blocked (Options.bBlockInput), heroes
 	// are untouchable, their scripts wait, and monsters within HoldMonstersRadius of the player's hero that are on
 	// their own AI stop and wait (they get their AI back afterwards). SwitchControlAtEnd: control passes to that hero
 	// when the scene ends. CameraBlendOut (step 3.4): seconds the view glides from the scene's last shot to the camera of
-	// the hero the player controls then (the new one after a switch) — no seam; 0 = a straight cut. False if Scene is
-	// empty or another scene is still playing.
-	bool PlayScene(ULevelSequence* Scene, bool bBlockPlayerInput, bool bHideHud, float HoldMonstersRadius, FName SwitchControlAtEnd,
-		float CameraBlendOut = 1.0f);
+	// the hero the player controls then (the new one after a switch) — no seam; 0 = a straight cut. PlayerMarkTag (step
+	// 3.2): first the player's hero walks by himself to that mark and turns the way it faces, then the scene starts.
+	// False if Scene is empty or another scene is still playing or being prepared.
+	bool PlayScene(ULevelSequence* Scene, const FPrologueSceneOptions& Options);
 
 	// The scene has played to its end (or was skipped) since the level started.
 	bool HasSceneFinished(const ULevelSequence* Scene) const;
 
 	UFUNCTION(BlueprintPure, Category = "Prologue|Scene")
 	bool IsScenePlaying() const { return bScenePlaying; }
+
+	// Step 3.2: the player's hero is walking to his mark before a scene.
+	bool IsScenePreparing() const { return bScenePreparing; }
 
 	// Step 2.9: fades to black and reloads the level; the prologue then goes on from the last checkpoint reached
 	// (UPrologueCheckpointSubsystem), or from the beginning if there is none.
@@ -303,6 +307,14 @@ private:
 	void HandleSceneFinished();
 	void EndScene(bool bSkipped);
 
+	// The scene itself (after the player's hero is on his mark, or right away).
+	bool StartScenePlayback(ULevelSequence* Scene);
+
+	// Step 3.2: every frame while the player's hero walks to his mark and turns; then the scene starts. bPutOnMark: he
+	// did not make it in time (or K) — he is put there.
+	void TickSceneMark(float DeltaSeconds);
+	void FinishSceneMark(bool bPutOnMark);
+
 	// A line on screen for the player (the failure warning) — key 605, like the "Message" action; not debug-only.
 	static void ShowSubtitle(const FString& Text, float Seconds);
 
@@ -362,14 +374,29 @@ private:
 	TObjectPtr<ULevelSequence> CurrentScene;
 
 	bool bScenePlaying = false;
-	FName SceneSwitchControlAtEnd;
+	FPrologueSceneOptions SceneOptions;
+
+	// Step 3.2: walking the player's hero to his mark before the scene.
+	bool bScenePreparing = false;
+	bool bMarkTurning = false;
+	UPROPERTY(Transient)
+	TObjectPtr<ULevelSequence> PendingScene;
+	TArray<FVector> MarkPath;
+	int32 MarkPathIndex = 0;
+	FVector MarkGoal = FVector::ZeroVector;
+	float MarkYaw = 0.0f;
+	double MarkStartTime = 0.0;
 
 	// Step 3.4: what the camera showed on the scene's last frame (captured every frame while it plays), and the
 	// temporary camera standing there while the view glides to the hero. The engine's own blend-out goes back to
 	// the camera from BEFORE the scene (the old hero), which would seam a hero switch — hence done here.
-	float SceneCameraBlendOut = 0.0f;
 	FMinimalViewInfo LastScenePOV;
 	bool bHasScenePOV = false;
+
+	// Glide into the scene: the player's view just before it started; waiting for the scene to take the camera.
+	FMinimalViewInfo SceneStartPOV;
+	bool bBlendInPending = false;
+	double BlendInGiveUpTime = 0.0;
 
 	UPROPERTY(Transient)
 	TObjectPtr<class ACameraActor> SceneBlendCamera;

@@ -287,7 +287,16 @@ FString UPrologueAction_LightItem::Describe() const
 
 void UPrologueAction_PlayScene::Execute(APrologueDirector& Director) const
 {
-	Director.PlayScene(Scene, bBlockInput, bHideHud, HoldMonstersRadius, SwitchControlAtEnd, CameraBlendOut);
+	FPrologueSceneOptions Options;
+	Options.bBlockInput = bBlockInput;
+	Options.bHideHud = bHideHud;
+	Options.HoldMonstersRadius = HoldMonstersRadius;
+	Options.SwitchControlAtEnd = SwitchControlAtEnd;
+	Options.CameraBlendOut = CameraBlendOut;
+	Options.CameraBlendIn = CameraBlendIn;
+	Options.PlayerMarkTag = PlayerMarkTag;
+	Options.MaxWalkTime = MaxWalkTime;
+	Director.PlayScene(Scene, Options);
 }
 
 FString UPrologueAction_PlayScene::Describe() const
