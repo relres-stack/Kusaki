@@ -1922,6 +1922,31 @@ void APrologueDirector::TickDebug()
 			{
 				Step.Trigger->DrawDebug(*this);
 			}
+			// Step 3.6: the marks this step's actions (and its checkpoint setup) will put someone on.
+			for (const UPrologueAction* Action : Step.Actions)
+			{
+				if (IsValid(Action))
+				{
+					Action->DrawDebug(*this);
+				}
+			}
+			if (Step.bCheckpoint)
+			{
+				for (const UPrologueAction* Action : Step.CheckpointSetup)
+				{
+					if (IsValid(Action))
+					{
+						Action->DrawDebug(*this);
+					}
+				}
+			}
+			// The mark the player's hero is walking to right now.
+			if (bScenePreparing)
+			{
+				const FVector Base = MarkGoal + FVector(0.0f, 0.0f, 20.0f);
+				DrawDebugSphere(GetWorld(), Base, 25.0f, 12, FColor::Yellow, false, -1.0f, 0, 2.0f);
+				DrawDebugDirectionalArrow(GetWorld(), Base, Base + FRotator(0.0f, MarkYaw, 0.0f).Vector() * 120.0f, 40.0f, FColor::Yellow, false, -1.0f, 0, 3.0f);
+			}
 			FString StepLine = FString::Printf(TEXT("Prologue step %d/%d '%s' (%.0f s) waits for: %s"), CurrentStepIndex + 1,
 				Scenario->Steps.Num(), *Step.Name, GetStepElapsedTime(), *Waiting);
 			// Step 2.9: failure state and the checkpoint a restart goes back to.

@@ -6,6 +6,7 @@
 #include "Animation/AnimSequence.h"
 #include "BaseCharacter.h"
 #include "Components/CapsuleComponent.h"
+#include "DrawDebugHelpers.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "LevelSequence.h"
@@ -132,6 +133,41 @@ void UPrologueAction_MonsterRole::Execute(APrologueDirector& Director) const
 FString UPrologueAction_MonsterRole::Describe() const
 {
 	return FString::Printf(TEXT("monster group '%s': %s"), *GroupName.ToString(), Role ? *Role->Describe() : TEXT("back to their own AI"));
+}
+
+namespace PrologueMarks
+{
+	// Step 3.6: a mark on the level for the debug readout — a ring where the hero stands, an arrow the way he will face,
+	// and a label. Every actor with the tag (an action uses the first one, so a second one shows a mistake).
+	void Draw(const APrologueDirector& Director, FName Tag, const FString& Label, const FColor& Color)
+	{
+		UWorld* World = Director.GetWorld();
+		if (!World || Tag.IsNone())
+		{
+			return;
+		}
+		TArray<AActor*> Marks;
+		UGameplayStatics::GetAllActorsWithTag(World, Tag, Marks);
+		for (int32 Index = 0; Index < Marks.Num(); ++Index)
+		{
+			const AActor* Mark = Marks[Index];
+			if (!IsValid(Mark))
+			{
+				continue;
+			}
+			const FVector Base = Mark->GetActorLocation() + FVector(0.0f, 0.0f, 5.0f);
+			const FVector Facing = FRotator(0.0f, Mark->GetActorRotation().Yaw, 0.0f).Vector();
+			DrawDebugCircle(World, Base, 40.0f, 24, Color, false, -1.0f, 0, 2.0f, FVector(1, 0, 0), FVector(0, 1, 0), false);
+			DrawDebugDirectionalArrow(World, Base, Base + Facing * 120.0f, 40.0f, Color, false, -1.0f, 0, 3.0f);
+			DrawDebugString(World, Base + FVector(0.0f, 0.0f, 60.0f),
+				Index == 0 ? Label : Label + TEXT(" (extra - not used)"), nullptr, Color, 0.0f, true, 1.1f);
+		}
+		if (Marks.Num() == 0)
+		{
+			// Said once in the readout line instead would be better, but a missing mark is worth a red flag.
+			UE_LOG(LogTemp, Verbose, TEXT("Prologue: no actor with tag '%s' for '%s'"), *Tag.ToString(), *Label);
+		}
+	}
 }
 
 namespace PrologueItems
@@ -299,6 +335,12 @@ void UPrologueAction_PlayScene::Execute(APrologueDirector& Director) const
 	Director.PlayScene(Scene, Options);
 }
 
+void UPrologueAction_PlayScene::DrawDebug(const APrologueDirector& Director) const
+{
+	PrologueMarks::Draw(Director, PlayerMarkTag, FString::Printf(TEXT("scene '%s': player's hero walks here ('%s')"),
+		*GetNameSafe(Scene), *PlayerMarkTag.ToString()), FColor::Yellow);
+}
+
 FString UPrologueAction_PlayScene::Describe() const
 {
 	return FString::Printf(TEXT("scene '%s'%s"), *GetNameSafe(Scene),
@@ -364,6 +406,12 @@ void UPrologueAction_PlaceHero::Execute(APrologueDirector& Director) const
 		PC->SetControlRotation(Facing);
 	}
 	UE_LOG(LogTemp, Warning, TEXT("Prologue: %s placed at marker '%s'"), *Hero->GetName(), *MarkerTag.ToString());
+}
+
+void UPrologueAction_PlaceHero::DrawDebug(const APrologueDirector& Director) const
+{
+	PrologueMarks::Draw(Director, MarkerTag, FString::Printf(TEXT("%s's place ('%s')"),
+		HeroId.IsNone() ? TEXT("player's hero") : *HeroId.ToString(), *MarkerTag.ToString()), FColor::Cyan);
 }
 
 FString UPrologueAction_PlaceHero::Describe() const

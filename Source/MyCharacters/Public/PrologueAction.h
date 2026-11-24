@@ -28,6 +28,10 @@ public:
 
 	// Short text for the log, e.g. "Priest appears".
 	virtual FString Describe() const PURE_VIRTUAL(UPrologueAction::Describe, return FString(););
+
+	// Step 3.6: draws, for one frame, where this action will put someone (marks), while its step waits. Nothing by
+	// default.
+	virtual void DrawDebug(const APrologueDirector& Director) const {}
 };
 
 // A line of text on screen — a stand-in for subtitles/voice until those exist.
@@ -207,6 +211,7 @@ public:
 
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;
+	virtual void DrawDebug(const APrologueDirector& Director) const override;
 };
 
 // A scripted death (step 2.9, usually in a step's "Fail Actions"): the hero dies right away (ABaseCharacter::
@@ -249,6 +254,7 @@ public:
 
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;
+	virtual void DrawDebug(const APrologueDirector& Director) const override;
 };
 
 // A holy item straight into a hero's free hand (steps 2.10-2.11, and checkpoint setups: after a restart the Priest
