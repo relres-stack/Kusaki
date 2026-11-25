@@ -23,7 +23,40 @@
 
     {"tag": "PL_Wasteland",     "x": 0.0,    "y": -208.0, "z": 3.93,   "note": "step 4: the wasteland in front of the gate - on the road right after its last bend (zone radius is in the trigger, 12 m); before the bear trap at y = -175"},
     {"tag": "PL_Wasteland",     "x": -35.0,  "y": -205.0, "z": 6.18,   "note": "same zone, west side (coming down off the road)"},
-    {"tag": "PL_Wasteland",     "x": 35.0,   "y": -205.0, "z": 1.87,   "note": "same zone, east side"}
+    {"tag": "PL_Wasteland",     "x": 35.0,   "y": -205.0, "z": 1.87,   "note": "same zone, east side"},
+
+    {"tag": "PL_RiderCrowd",    "x": 95.0,   "y": -168.0, "z": 0.16,  "note": "step 6 (4.3): the Rider rides here on a monster, in her crowd - ~95 m east of the bear trap, the Redneck sees her from there"},
+
+    {"tag": "PL_TrapZone",      "x": -48.0, "y": -172.0, "z": -2.18, "note": "step 6 (4.3): a band across the approach to the gate, 3 m before the bear trap, plus two by the gate; the zone radius is in the trigger (9 m). Entering it springs the trap on the Redneck wherever he is"},
+    {"tag": "PL_TrapZone",      "x": -32.0, "y": -172.0, "z": -1.85},
+    {"tag": "PL_TrapZone",      "x": -16.0, "y": -172.0, "z": 0.12},
+    {"tag": "PL_TrapZone",      "x": 0.0, "y": -172.0, "z": 0.39},
+    {"tag": "PL_TrapZone",      "x": 16.0, "y": -172.0, "z": 0.09},
+    {"tag": "PL_TrapZone",      "x": 32.0, "y": -172.0, "z": -0.05},
+    {"tag": "PL_TrapZone",      "x": 48.0, "y": -172.0, "z": 0.27},
+    {"tag": "PL_TrapZone",      "x": -18.0, "y": -135.0, "z": 0.0},
+    {"tag": "PL_TrapZone",      "x": 18.0, "y": -135.0, "z": 0.0}
+  ],
+  "bear_trap": {"label": "RTD_BearTrap_Gate", "x": 0.5, "y": -175.0, "z": 0.625,
+    "note": "rtd_build_level.py places it from rtd_layout.json 20 cm under the road surface (0.585 m here) - lifted so its 8 cm disc shows"},
+  "props": [
+    {"tag": "PL_GateClosed", "label": "PL_GateClosed", "mesh": "/Engine/BasicShapes/Cube", "material": "/Game/RoadToDawn/Materials/M_RTD_Fence",
+     "x": 0.0, "y": -125.0, "z_base": 0.0, "w": 14.0, "d": 0.9, "h": 7.5, "yaw_math": 0.0, "hidden": true,
+     "note": "step 5 (4.3): stand-in for the main gate closing - a solid leaf in the gateway (like the closed north gate), hidden and without collision until 'Show / hide actors' shows it; the open leaves (ISM in RTD_Walls) stay"}
+  ],
+  "monsters": [
+    {"tag": "PL_M_Gate", "class": "/Game/ThirdPerson/Blueprints/BP_TestMonster.BP_TestMonster_C", "face": [0.0, -175.0],
+     "points": [[-55.0, -132.0, 0.02], [-75.0, -138.0, 0.21], [55.0, -132.0, 0.0], [75.0, -138.0, 0.0], [90.0, -145.0, 0.0]],
+     "note": "the pack along the outer wall east and west of the gate; on their own AI until the trap, then 'Surround hero' Redneck"},
+    {"tag": "PL_M_Priest", "class": "/Game/ThirdPerson/Blueprints/BP_TestMonster.BP_TestMonster_C", "face": [-70.0, -165.0],
+     "points": [[-82.0, -150.0, 0.51], [-58.0, -182.0, -0.74], [-88.0, -178.0, 2.33]],
+     "note": "around the Priest's waiting spot - they press him, his candles drive them off"},
+    {"tag": "PL_M_Rider", "class": "/Game/ThirdPerson/Blueprints/BP_TestMonster.BP_TestMonster_C", "face": [95.0, -168.0],
+     "points": [[88.0, -160.0, 0.05], [108.0, -161.0, 0.11], [89.0, -178.0, 0.49], [110.0, -178.0, 0.44]],
+     "note": "the Rider's crowd, already at PL_RiderCrowd (east edge of the wasteland): a ridden monster walks at its PatrolSpeed (1 m/s), so she runs here on foot and only rides the last metres; 'Surround hero' Rider keeps them around her"},
+    {"tag": "PL_M_RiderMount", "class": "/Game/ThirdPerson/Blueprints/BP_TestMonster.BP_TestMonster_C", "face": [95.0, -168.0],
+     "points": [[103.0, -170.0, 0.27]],
+     "note": "the monster the Rider runs to and mounts ('Use ability' TryMount - the nearest one in reach), 8 m from PL_RiderCrowd"}
   ],
   "navmesh_extra": [
     {"label": "RTD_NavMeshBounds_River", "x": 192.5, "y": -240.0, "w": 85.0, "d": 240.0, "note": "the main nav-mesh ends at x = 190; the Rider runs along the river bank (x 170-205)"}

@@ -16,11 +16,11 @@ class UAnimSequence;
 // entirely on its GetOwner() (cast to ACharacter/ABaseCharacter) for every actor-level effect (attachment,
 // collision, camera, equipped-item physics) since a UActorComponent has no transform/collision of its own.
 //
-// Detection is unified with the aiming/crosshair system (see ABaseCharacter::TraceAimTarget()) rather than
-// running its own independent sweep: TryMount() mounts whatever the crosshair is currently aimed at (the
-// same trace that turns the HUD dot green over a mountable ABaseMonster — see UCrosshairWidget/
-// UpdateAimCrosshair()), so "mount when the crosshair target is valid" is literally true, not just a
-// design intention.
+// Detection (FindMonsterToMount()): the crosshair first (ABaseCharacter::TraceAimTarget() — the same trace that turns
+// the HUD dot green over a mountable ABaseMonster), so aiming at a monster still picks that one; otherwise, since
+// 24.11.2026 (task 04 decision 13, user-approved change of this stable mechanic), the nearest monster CanMountMonster()
+// accepts within MountDistanceThreshold — F mounts without aiming, and the prologue's AI Rider (no player camera, no
+// crosshair) can mount too. MountMonster() mounts one given monster.
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class MYCHARACTERS_API UMountRiderComponent : public UActorComponent
 {
@@ -81,14 +81,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mounting")
 	TObjectPtr<UAnimSequence> MountedRidingAnimation = nullptr;
 
-	// Attempts to mount whatever the owning character's crosshair (ABaseCharacter::TraceAimTarget()) is
-	// currently aimed at — see this class's own header comment for why detection is unified with aiming
-	// rather than run as an independent sweep. Bound to the "Mount" action/F key by
-	// ARiderCharacter::SetupPlayerInputComponent(). No-op if already mounted, if the owner isn't a valid
-	// ABaseCharacter, or if CanMountMonster() refuses the crosshair's current target — see its own
-	// [Mount Attempt] on-screen/log diagnostic for exactly why.
+	// Mounts FindMonsterToMount()'s pick (the monster under the crosshair, else the nearest mountable one in reach).
+	// Bound to the "Mount" action/F key by ARiderCharacter::SetupPlayerInputComponent(); the prologue's AI Rider calls
+	// it from her script ("Use ability"). No-op if already mounted, if the owner isn't a valid ABaseCharacter, or if
+	// no monster qualifies — see the [Mount Attempt] on-screen/log diagnostic for exactly why.
 	UFUNCTION(BlueprintCallable, Category = "Mounting")
 	void TryMount();
+
+	// Mounts this monster: every CanMountMonster() check at the real distance, then the mount itself (attach, collision,
+	// camera, held items, ABaseMonster::OnMounted()). True if mounted.
+	UFUNCTION(BlueprintCallable, Category = "Mounting")
+	bool MountMonster(ABaseMonster* Monster);
+
+	// The monster TryMount() would mount now: the one under the crosshair if it qualifies, otherwise the nearest one
+	// CanMountMonster() accepts within MountDistanceThreshold. nullptr = none.
+	ABaseMonster* FindMonsterToMount() const;
 
 	// Evaluates every condition required to mount Monster from DistanceToMonster units away, and returns
 	// true only if ALL of them pass: owner not Panicking, owner not Trapped (Bear Trap), Monster

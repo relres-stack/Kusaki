@@ -88,7 +88,7 @@ void ARiderCharacter::GetControlHints(TArray<FControlHint>& OutHints) const
 {
 	// Keep in sync with SetupPlayerInputComponent() above and OnMountOrHookPressed() below.
 	OutHints.Add(FControlHint::Section(INVTEXT("НАЕЗДНИЦА")));
-	OutHints.Emplace(INVTEXT("F (смотреть на монстра)"), INVTEXT("сесть верхом"));
+	OutHints.Emplace(INVTEXT("F (рядом с монстром)"), INVTEXT("сесть верхом (на того, на кого смотришь, иначе на ближайшего)"));
 	OutHints.Emplace(INVTEXT("Пробел (верхом)"), INVTEXT("спешиться"));
 	OutHints.Emplace(INVTEXT("F (верхом, на крючок)"), INVTEXT("зацепиться за крючок"));
 	OutHints.Emplace(INVTEXT("F (на крючке)"), INVTEXT("спрыгнуть"));

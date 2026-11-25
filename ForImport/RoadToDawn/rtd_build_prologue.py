@@ -138,6 +138,65 @@ def build():
         placed += 1
     log("markers placed: %d" % placed)
 
+    # props (step 4.3: the closed gate leaf, hidden until the scenario shows it - "Show / hide actors (by tag)")
+    for pr in P.get("props", []):
+        try:
+            mesh = unreal.load_asset(pr.get("mesh", "/Engine/BasicShapes/Cube"))
+            mat = unreal.load_asset(pr["material"]) if pr.get("material") else None
+            loc = vec(pr["x"], pr["y"], pr.get("z_base", 0.0) + pr["h"] / 2.0)   # a 1 m cube is centred
+            rot = unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0 - pr.get("yaw_math", 0.0))  # local X along the plan direction
+            a = actor_sub.spawn_actor_from_class(unreal.StaticMeshActor, loc, rot)
+            comp = a.static_mesh_component
+            comp.set_mobility(unreal.ComponentMobility.MOVABLE)   # shown/hidden at run time
+            comp.set_static_mesh(mesh)
+            if mat is not None:
+                comp.set_material(0, mat)
+            a.set_actor_scale3d(unreal.Vector(pr["w"], pr["d"], pr["h"]))
+            a.set_actor_label(pr.get("label", pr["tag"]))
+            a.set_folder_path(FOLDER)
+            a.set_editor_property("tags", [unreal.Name(pr["tag"])])
+            if pr.get("hidden"):
+                a.set_actor_hidden_in_game(True)
+                a.set_actor_enable_collision(False)
+        except Exception as ex:  # noqa
+            warn("prop %s not placed: %s" % (pr.get("tag"), ex))
+    log("props placed: %d" % len(P.get("props", [])))
+
+    # monsters (step 4.3): groups found by the scenario through their tag ("Monster group: role" with a Monster Tag)
+    placed_monsters = 0
+    for grp in P.get("monsters", []):
+        cls = unreal.load_class(None, grp["class"])
+        if cls is None:
+            warn("monster class not found: %s" % grp["class"])
+            continue
+        for i, pt in enumerate(grp["points"]):
+            x, y, z = pt[0], pt[1], pt[2]
+            yaw = yaw_towards(x, y, grp["face"]) if grp.get("face") else 0.0
+            a = actor_sub.spawn_actor_from_class(cls, vec(x, y, z + grp.get("lift", 1.0)), unreal.Rotator(roll=0.0, pitch=0.0, yaw=yaw))
+            if a is None:
+                warn("monster %s_%d not spawned at (%.1f, %.1f)" % (grp["tag"], i + 1, x, y))
+                continue
+            a.set_actor_label("%s_%d" % (grp["tag"], i + 1))
+            a.set_folder_path(FOLDER + "/Monsters")
+            a.set_editor_property("tags", [unreal.Name(grp["tag"])])
+            placed_monsters += 1
+    log("monsters placed: %d" % placed_monsters)
+
+    # the bear trap that rtd_build_level.py placed: lifted onto the road surface (the layout puts it 20 cm under the road,
+    # the 8 cm disc was invisible). Not in our folder - the generator owns it; this only moves it.
+    bt = P.get("bear_trap")
+    if bt:
+        moved = 0
+        cls = unreal.load_class(None, "/Script/MyCharacters.BearTrap")
+        for a in actor_sub.get_all_level_actors():
+            try:
+                if cls is not None and isinstance(a, cls) and str(a.get_actor_label()) == bt.get("label", "RTD_BearTrap_Gate"):
+                    a.set_actor_location(vec(bt["x"], bt["y"], bt["z"]), False, False)
+                    moved += 1
+            except Exception as ex:  # noqa
+                warn("bear trap not moved: %s" % ex)
+        log("bear trap moved onto the road: %d" % moved)
+
     # extra nav-mesh bounds
     for nv in P.get("navmesh_extra", []):
         try:

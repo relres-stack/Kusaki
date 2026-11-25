@@ -158,6 +158,17 @@ private:
 	void GiveUp(UHeroScriptRunner& Runner);
 	void HandleMoveFinished(FAIRequestID RequestID, const FPathFollowingResult& Result);
 
+	// Step 4.3b (decision 13): the hero rides a monster (the Rider, UMountRiderComponent). He cannot path-follow himself
+	// (attached, MOVE_None), so he steers the monster through his movement input — ABaseCharacter::AddMovementInput()
+	// already hands it to the ridden monster, exactly as the player's WASD — along a navmesh path computed for the
+	// monster. Arrival, the stuck check and "put him there" count from the monster.
+	EHeroScriptCommandStatus TickRiding(UHeroScriptRunner& Runner);
+	void RideGiveUp(UHeroScriptRunner& Runner, class ABaseMonster* Mount, const FVector& GoalLocation);
+	bool bRiding = false;
+	TArray<FVector> RidePath;
+	int32 RidePathIndex = 0;
+	double NextRepathTime = 0.0;
+
 	FDelegateHandle MoveFinishedHandle;
 	TWeakObjectPtr<class UPathFollowingComponent> BoundPathFollowing;
 	uint32 RequestId = 0;

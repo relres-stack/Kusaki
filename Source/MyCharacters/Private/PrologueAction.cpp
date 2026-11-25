@@ -14,6 +14,8 @@
 #include "Components/HeroScriptRunner.h"
 #include "Components/ScriptedKnockdownComponent.h"
 #include "Engine/Engine.h"
+#include "BearTrap.h"
+#include "EngineUtils.h"
 #include "PrologueDirector.h"
 #include "PrologueTrigger.h"
 
@@ -286,6 +288,87 @@ FString UPrologueAction_HandOverItem::Describe() const
 {
 	return FString::Printf(TEXT("%s hands his %s to %s"), FromHeroId.IsNone() ? TEXT("player's hero") : *FromHeroId.ToString(),
 		ItemType == EHolyItemType::Censer ? TEXT("censer") : TEXT("candle"), ToHeroId.IsNone() ? TEXT("player's hero") : *ToHeroId.ToString());
+}
+
+void UPrologueAction_ShowActors::Execute(APrologueDirector& Director) const
+{
+	TArray<AActor*> Actors;
+	UGameplayStatics::GetAllActorsWithTag(&Director, ActorTag, Actors);
+	for (AActor* Actor : Actors)
+	{
+		if (IsValid(Actor))
+		{
+			Actor->SetActorHiddenInGame(!bShow);
+			Actor->SetActorEnableCollision(bShow);
+		}
+	}
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: %s %d actor(s) with tag '%s'"), bShow ? TEXT("shows") : TEXT("hides"), Actors.Num(), *ActorTag.ToString());
+}
+
+FString UPrologueAction_ShowActors::Describe() const
+{
+	return FString::Printf(TEXT("%s actors '%s'"), bShow ? TEXT("show") : TEXT("hide"), *ActorTag.ToString());
+}
+
+void UPrologueAction_ShowActors::DrawDebug(const APrologueDirector& Director) const
+{
+	UWorld* World = Director.GetWorld();
+	if (!World || ActorTag.IsNone())
+	{
+		return;
+	}
+	TArray<AActor*> Actors;
+	UGameplayStatics::GetAllActorsWithTag(&Director, ActorTag, Actors);
+	for (const AActor* Actor : Actors)
+	{
+		if (IsValid(Actor))
+		{
+			// Their bounds even while hidden: where the step will make something appear (green) or go (red).
+			FVector Origin;
+			FVector Extent;
+			Actor->GetActorBounds(false, Origin, Extent, true);
+			DrawDebugBox(World, Origin, Extent, bShow ? FColor::Green : FColor::Red, false, -1.0f, 0, 6.0f);
+			DrawDebugString(World, Origin + FVector(0.0f, 0.0f, Extent.Z + 50.0f), Describe(), nullptr, bShow ? FColor::Green : FColor::Red, 0.0f, true);
+		}
+	}
+}
+
+void UPrologueAction_SpringTrap::Execute(APrologueDirector& Director) const
+{
+	ABaseCharacter* Hero = Director.ResolveHero(HeroId);
+	if (!IsValid(Hero) || Hero->bIsTrapped || Hero->bIsDead)
+	{
+		return;
+	}
+	ABearTrap* Nearest = nullptr;
+	float NearestDistance = SearchRadius;
+	for (TActorIterator<ABearTrap> It(Director.GetWorld()); It; ++It)
+	{
+		const float Distance = FVector::Dist2D(It->GetActorLocation(), Hero->GetActorLocation());
+		if (Distance <= NearestDistance)
+		{
+			Nearest = *It;
+			NearestDistance = Distance;
+		}
+	}
+	if (!IsValid(Nearest))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: no bear trap within %.0f m of %s - nothing springs"), SearchRadius / 100.0f, *Hero->GetName());
+		return;
+	}
+	// Under his feet; the move's overlap update is what makes the trap catch him (UpdateOverlaps() once more in case the
+	// move did not report it).
+	const float HalfHeight = Hero->GetCapsuleComponent() ? Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 90.0f;
+	const FVector Feet = Hero->GetActorLocation() - FVector(0.0f, 0.0f, HalfHeight);
+	Nearest->SetActorLocation(Feet, false, nullptr, ETeleportType::TeleportPhysics);
+	Nearest->UpdateOverlaps();
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: bear trap %s moved %.1f m to %s's feet - %s"), *Nearest->GetName(), NearestDistance / 100.0f,
+		*Hero->GetName(), Hero->bIsTrapped ? TEXT("caught") : TEXT("did NOT catch him (already sprung?)"));
+}
+
+FString UPrologueAction_SpringTrap::Describe() const
+{
+	return FString::Printf(TEXT("bear trap springs on %s"), HeroId.IsNone() ? TEXT("player's hero") : *HeroId.ToString());
 }
 
 void UPrologueAction_LightItem::Execute(APrologueDirector& Director) const

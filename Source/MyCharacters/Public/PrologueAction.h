@@ -328,6 +328,49 @@ public:
 	virtual FString Describe() const override;
 };
 
+// Step 4.3c: every actor with a tag appears or disappears, together with its collision — a stand-in for a change in
+// the level that the real thing will animate later (the gate closes: the closed leaf that rtd_build_prologue.py placed
+// hidden in the gateway appears and blocks it).
+UCLASS(meta = (DisplayName = "Show / hide actors (by tag)"))
+class MYCHARACTERS_API UPrologueAction_ShowActors : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName ActorTag;
+
+	// On: they appear and block. Off: they disappear and let everything through.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bShow = true;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+	virtual void DrawDebug(const APrologueDirector& Director) const override;
+};
+
+// Step 4.3 (scenario step 5): the bear trap snaps shut on a hero wherever he is — the scene needs the Redneck caught
+// at the gate whatever line he ran (the trap is small and easy to miss). The nearest ABearTrap is moved under his feet
+// and its own overlap catches him as if he had stepped in: the trap (a stable mechanic) is not changed, only moved.
+// Nothing happens if he is already trapped (he stepped in by himself).
+UCLASS(meta = (DisplayName = "Bear trap: spring on hero"))
+class MYCHARACTERS_API UPrologueAction_SpringTrap : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	// Empty = the hero the player controls.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName HeroId;
+
+	// Only a trap this close to him (flat, cm) is moved — not one somewhere else on the level.
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0.0"))
+	float SearchRadius = 10000.0f;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+};
+
 // Lights or puts out a hero's held item (step 2.11: the Priest gets up and lights his censer with little oil left).
 // Through AHolyItem::LightUp() / Extinguish(); an item with no fuel does not light (LightUp()'s own rule).
 UCLASS(meta = (DisplayName = "Light / put out a hero's item"))

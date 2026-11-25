@@ -9,6 +9,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 
 UMountRiderComponent::UMountRiderComponent()
 {
@@ -89,6 +90,44 @@ bool UMountRiderComponent::CanMountMonster(const ABaseMonster* Monster, float Di
 	return false;
 }
 
+ABaseMonster* UMountRiderComponent::FindMonsterToMount() const
+{
+	if (!IsValid(OwnerCharacter))
+	{
+		return nullptr;
+	}
+
+	// The crosshair first, as before: aiming at a mountable monster picks that one even when another is nearer.
+	// TraceAimTarget() reads the player's camera, so under AI (the prologue's scripted Rider) it is false.
+	FVector TargetPoint;
+	FHitResult AimHit;
+	if (OwnerCharacter->TraceAimTarget(TargetPoint, AimHit))
+	{
+		ABaseMonster* Aimed = Cast<ABaseMonster>(AimHit.GetActor());
+		FString Reason;
+		if (IsValid(Aimed) && CanMountMonster(Aimed, FVector::Dist(OwnerCharacter->GetActorLocation(), Aimed->GetActorLocation()), Reason))
+		{
+			return Aimed;
+		}
+	}
+
+	// Otherwise the nearest monster CanMountMonster() accepts (it also refuses anything beyond MountDistanceThreshold).
+	ABaseMonster* Nearest = nullptr;
+	float NearestDistance = MAX_FLT;
+	for (TActorIterator<ABaseMonster> It(GetWorld()); It; ++It)
+	{
+		ABaseMonster* Monster = *It;
+		const float Distance = FVector::Dist(OwnerCharacter->GetActorLocation(), Monster->GetActorLocation());
+		FString Reason;
+		if (Distance < NearestDistance && Distance <= MountDistanceThreshold && CanMountMonster(Monster, Distance, Reason))
+		{
+			Nearest = Monster;
+			NearestDistance = Distance;
+		}
+	}
+	return Nearest;
+}
+
 void UMountRiderComponent::TryMount()
 {
 	if (bIsMounted || !IsValid(OwnerCharacter))
@@ -96,14 +135,27 @@ void UMountRiderComponent::TryMount()
 		return;
 	}
 
-	// Unified with the crosshair/aim system — mounts whatever the SAME trace that colors the HUD dot
-	// green is currently aimed at (see this class's own header comment for why), rather than running an
-	// independent forward sweep.
-	FVector TargetPoint;
-	FHitResult AimHit;
-	OwnerCharacter->TraceAimTarget(TargetPoint, AimHit);
+	ABaseMonster* TargetMonster = FindMonsterToMount();
+	if (!IsValid(TargetMonster))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Mount Attempt] F pressed | no mountable monster under the crosshair or within %.0f units"), MountDistanceThreshold);
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(227, 3.0f, FColor::Red,
+				FString::Printf(TEXT("[Mount Attempt] no monster to mount within %.1f m"), MountDistanceThreshold / 100.0f));
+		}
+		return;
+	}
+	MountMonster(TargetMonster);
+}
 
-	ABaseMonster* TargetMonster = Cast<ABaseMonster>(AimHit.GetActor());
+bool UMountRiderComponent::MountMonster(ABaseMonster* TargetMonster)
+{
+	if (bIsMounted || !IsValid(OwnerCharacter))
+	{
+		return false;
+	}
+
 	const float DistanceToTarget = IsValid(TargetMonster) ? FVector::Dist(OwnerCharacter->GetActorLocation(), TargetMonster->GetActorLocation()) : -1.0f;
 
 	FString CanMountReason;
@@ -112,7 +164,7 @@ void UMountRiderComponent::TryMount()
 	const FString TargetNameForDiagnostic = IsValid(TargetMonster) ? TargetMonster->GetName() : TEXT("None");
 	const FString DistanceForDiagnostic = IsValid(TargetMonster) ? FString::Printf(TEXT("%.1f"), DistanceToTarget) : TEXT("N/A");
 
-	UE_LOG(LogTemp, Warning, TEXT("[Mount Attempt] Player pressed F | Target Monster: %s | CanMount: %s | Distance: %s | Reason: %s"),
+	UE_LOG(LogTemp, Warning, TEXT("[Mount Attempt] Target Monster: %s | CanMount: %s | Distance: %s | Reason: %s"),
 		*TargetNameForDiagnostic, bCanMount ? TEXT("YES") : TEXT("NO"), *DistanceForDiagnostic, *CanMountReason);
 	if (GEngine)
 	{
@@ -123,7 +175,7 @@ void UMountRiderComponent::TryMount()
 
 	if (!bCanMount)
 	{
-		return;
+		return false;
 	}
 
 	bIsMounted = true;
@@ -217,6 +269,7 @@ void UMountRiderComponent::TryMount()
 		GEngine->AddOnScreenDebugMessage(1003, 3.0f, FColor::Green,
 			FString::Printf(TEXT("Successfully mounted %s!"), *TargetMonster->GetName()));
 	}
+	return true;
 }
 
 void UMountRiderComponent::Dismount()

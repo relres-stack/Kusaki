@@ -7,6 +7,7 @@
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
 #include "BaseCharacter.h"
+#include "BaseMonster.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/HeroScriptRunner.h"
 #include "Components/ScriptedKnockdownComponent.h"
@@ -17,6 +18,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "NavigationData.h"
+#include "NavigationPath.h"
 #include "NavigationSystem.h"
 #include "PrologueDirector.h"
 #include "Sound/SoundBase.h"
@@ -33,6 +35,10 @@ namespace
 	// ...for this long, s (longer when following someone who walks too).
 	constexpr double StuckSeconds = 3.0;
 	constexpr double StuckSecondsFollowing = 6.0;
+	// Riding (step 4.3b): how often the path for the ridden monster is computed again, s, and how close to a path point
+	// counts as passed, cm.
+	constexpr double RideRepathSeconds = 0.5;
+	constexpr float RidePointReachedCm = 150.0f;
 }
 
 FString FHeroScriptTarget::Describe() const
@@ -54,6 +60,17 @@ void UHeroScriptCommand_MoveTo::Start(UHeroScriptRunner& Runner)
 {
 	ABaseCharacter* Hero = Runner.GetHero();
 	UCharacterMovementComponent* MoveComp = Hero->GetCharacterMovement();
+
+	// Riding a monster: no path following and no speed change of his own — the monster carries him (TickRiding()).
+	bRiding = Hero->IsMounted() && IsValid(Hero->GetMountedMonster());
+	if (bRiding)
+	{
+		BestDistance = MAX_FLT;
+		ProgressTime = Runner.GetWorldTime();
+		NextRepathTime = 0.0;
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s rides %s to %s"), *Runner.GetHeroName(), *Hero->GetMountedMonster()->GetName(), *Target.Describe());
+		return;
+	}
 
 	switch (Speed)
 	{
@@ -181,6 +198,10 @@ EHeroScriptCommandStatus UHeroScriptCommand_MoveTo::Tick(UHeroScriptRunner& Runn
 	{
 		return EHeroScriptCommandStatus::Done;
 	}
+	if (bRiding)
+	{
+		return TickRiding(Runner);
+	}
 
 	// Stuck: moving (maybe even fast, circling under a path point he cannot reach) but no closer to the target.
 	const double Now = Runner.GetWorldTime();
@@ -229,6 +250,123 @@ EHeroScriptCommandStatus UHeroScriptCommand_MoveTo::Tick(UHeroScriptRunner& Runn
 		}
 	}
 	return bArrived ? EHeroScriptCommandStatus::Done : EHeroScriptCommandStatus::Running;
+}
+
+EHeroScriptCommandStatus UHeroScriptCommand_MoveTo::TickRiding(UHeroScriptRunner& Runner)
+{
+	ABaseCharacter* Hero = Runner.GetHero();
+	ABaseMonster* Mount = Hero->GetMountedMonster();
+	if (!Hero->IsMounted() || !IsValid(Mount))
+	{
+		// Knocked off or got down on the way: the rest of the way on foot.
+		bRiding = false;
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s is no longer riding - goes on to %s on foot"), *Runner.GetHeroName(), *Target.Describe());
+		RequestMove(Runner);
+		return EHeroScriptCommandStatus::Running;
+	}
+
+	AActor* GoalActor = nullptr;
+	FVector GoalLocation;
+	if (!Runner.ResolveTarget(Target, GoalActor, GoalLocation))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s cannot find %s - the ride is skipped"), *Runner.GetHeroName(), *Target.Describe());
+		return EHeroScriptCommandStatus::Done;
+	}
+
+	const FVector From = Mount->GetActorLocation();
+	const float MountRadius = Mount->GetCapsuleComponent() ? Mount->GetCapsuleComponent()->GetScaledCapsuleRadius() : 50.0f;
+	const float Distance = FVector::Dist2D(From, GoalLocation);
+	if (Distance <= AcceptanceRadius + MountRadius)
+	{
+		bArrived = true;
+		return EHeroScriptCommandStatus::Done;
+	}
+
+	const double Now = Runner.GetWorldTime();
+	UWorld* World = Hero->GetWorld();
+	if (RidePath.Num() == 0 || Now >= NextRepathTime)
+	{
+		NextRepathTime = Now + RideRepathSeconds;
+		RidePath.Reset();
+		RidePathIndex = 0;
+		// From where the monster stands, on the level's main navmesh: with the monster as the query context no path was
+		// found at all (24.11.2026, "rides straight" - its nav agent is sized by its capsule, NavAgentProps -1, and
+		// probably matches no navmesh), so no context, like the heroes' own default agent.
+		UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+		const UNavigationPath* Path = Nav ? Nav->FindPathToLocationSynchronously(World, From, GoalLocation, nullptr) : nullptr;
+		if (Path && Path->IsValid() && Path->PathPoints.Num() > 0)
+		{
+			RidePath = Path->PathPoints;
+			bWithoutPathfinding = false;
+		}
+		else
+		{
+			if (!bWithoutPathfinding)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Prologue: %s finds no navmesh path for the ridden monster to %s - rides straight"), *Runner.GetHeroName(), *Target.Describe());
+			}
+			RidePath.Add(GoalLocation);
+			bWithoutPathfinding = true;
+		}
+	}
+	while (RidePathIndex < RidePath.Num() - 1 && FVector::Dist2D(From, RidePath[RidePathIndex]) < RidePointReachedCm)
+	{
+		++RidePathIndex;
+	}
+	// Handed to the monster by ABaseCharacter::AddMovementInput(), as the player's WASD is (bForce: a scene's blocked
+	// input does not stop a scripted ride).
+	Hero->AddMovementInput((RidePath[RidePathIndex] - From).GetSafeNormal2D(), 1.0f, true);
+
+	if (Distance < BestDistance - StuckProgressCm)
+	{
+		BestDistance = Distance;
+		ProgressTime = Now;
+	}
+	else if (Now - ProgressTime > StuckSeconds)
+	{
+		++Attempts;
+		ProgressTime = Now;
+		NextRepathTime = Now;
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s's monster got no closer to %s for %.0f s (%.1f m left) - new path, try %d/%d"),
+			*Runner.GetHeroName(), *Target.Describe(), StuckSeconds, Distance / 100.0f, Attempts, MaxMoveAttempts);
+		if (Attempts >= MaxMoveAttempts)
+		{
+			RideGiveUp(Runner, Mount, GoalLocation);
+			return EHeroScriptCommandStatus::Done;
+		}
+	}
+	return EHeroScriptCommandStatus::Running;
+}
+
+void UHeroScriptCommand_MoveTo::RideGiveUp(UHeroScriptRunner& Runner, ABaseMonster* Mount, const FVector& GoalLocation)
+{
+	bArrived = true;
+	if (!bTeleportIfStuck)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s could not ride to %s after %d tries - stays where he is, the script goes on"),
+			*Runner.GetHeroName(), *Target.Describe(), Attempts);
+		return;
+	}
+	// The monster is put there (the rider is attached to it and comes along), on the navmesh if there is one.
+	FVector Destination = GoalLocation;
+	const float HalfHeight = Mount->GetCapsuleComponent() ? Mount->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 90.0f;
+	FNavLocation OnNavmesh;
+	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(Mount->GetWorld());
+	Destination = (Nav && Nav->ProjectPointToNavigation(GoalLocation, OnNavmesh, FVector(200.0f, 200.0f, 400.0f)))
+		? OnNavmesh.Location + FVector(0.0f, 0.0f, HalfHeight)
+		: GoalLocation + FVector(0.0f, 0.0f, HalfHeight);
+	const FRotator Facing(0.0f, (GoalLocation - Mount->GetActorLocation()).GetSafeNormal2D().Rotation().Yaw, 0.0f);
+	if (!Mount->TeleportTo(Destination, Facing))
+	{
+		Mount->SetActorLocationAndRotation(Destination, Facing, false, nullptr, ETeleportType::TeleportPhysics);
+	}
+	const FString Message = FString::Printf(TEXT("Prologue: %s's monster got stuck on the way to %s and was put there (fix the navmesh/level at %s)"),
+		*Runner.GetHeroName(), *Target.Describe(), *Mount->GetActorLocation().ToCompactString());
+	UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 8.0f, FColor::Orange, Message);
+	}
 }
 
 void UHeroScriptCommand_MoveTo::GiveUp(UHeroScriptRunner& Runner)
@@ -284,6 +422,24 @@ void UHeroScriptCommand_MoveTo::GiveUp(UHeroScriptRunner& Runner)
 
 void UHeroScriptCommand_MoveTo::DrawDebug(const UHeroScriptRunner& Runner) const
 {
+	if (bRiding)
+	{
+		// The ridden monster's path: magenta, the point it heads for now orange.
+		if (UWorld* RideWorld = Runner.GetWorld())
+		{
+			const FVector Lift(0.0f, 0.0f, 30.0f);
+			for (int32 i = 0; i < RidePath.Num(); ++i)
+			{
+				const bool bNext = i == RidePathIndex;
+				DrawDebugSphere(RideWorld, RidePath[i] + Lift, bNext ? 30.0f : 15.0f, 8, bNext ? FColor::Orange : FColor::Magenta, false, -1.0f, 0, 2.0f);
+				if (i > 0)
+				{
+					DrawDebugLine(RideWorld, RidePath[i - 1] + Lift, RidePath[i] + Lift, FColor::Magenta, false, -1.0f, 0, 4.0f);
+				}
+			}
+		}
+		return;
+	}
 	const AAIController* AI = Runner.GetAIController();
 	const UPathFollowingComponent* PathFollowing = IsValid(AI) ? AI->GetPathFollowingComponent() : nullptr;
 	UWorld* World = Runner.GetWorld();
@@ -360,8 +516,10 @@ FString UHeroScriptCommand_MoveTo::DescribeProgress(const UHeroScriptRunner& Run
 	{
 		return FString();
 	}
-	return FString::Printf(TEXT("%.1f m left, %.0f cm/s%s, try %d"), FVector::Dist2D(Hero->GetActorLocation(), GoalLocation) / 100.0f,
-		Hero->GetVelocity().Size2D(), bWithoutPathfinding ? TEXT(", no navmesh path") : TEXT(""), Attempts + 1);
+	const AActor* Mover = (bRiding && IsValid(Hero->GetMountedMonster())) ? static_cast<const AActor*>(Hero->GetMountedMonster()) : Hero;
+	return FString::Printf(TEXT("%s%.1f m left, %.0f cm/s%s, try %d"), bRiding ? TEXT("riding, ") : TEXT(""),
+		FVector::Dist2D(Mover->GetActorLocation(), GoalLocation) / 100.0f,
+		Mover->GetVelocity().Size2D(), bWithoutPathfinding ? TEXT(", no navmesh path") : TEXT(""), Attempts + 1);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
