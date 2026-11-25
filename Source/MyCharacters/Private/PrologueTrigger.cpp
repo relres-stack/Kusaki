@@ -244,6 +244,20 @@ FString UPrologueTrigger_SceneFinished::DescribeCondition() const
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Scene reached a moment
+
+bool UPrologueTrigger_SceneTime::Check(const APrologueDirector& Director) const
+{
+	const float Time = Director.GetSceneTime(Scene);
+	return Time >= 0.0f && Time >= Seconds;
+}
+
+FString UPrologueTrigger_SceneTime::DescribeCondition() const
+{
+	return FString::Printf(TEXT("scene '%s' at %.1f s"), *GetNameSafe(Scene), Seconds);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Heroes too far apart
 
 bool UPrologueTrigger_HeroesApart::GetAlongGoal(const APrologueDirector& Director, float& OutAhead) const

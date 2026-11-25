@@ -38,7 +38,13 @@
     {"tag": "PL_TrapZone",      "x": 18.0, "y": -135.0, "z": 0.0},
 
     {"tag": "PL_GateMid",       "x": 0.0,    "y": -150.0, "z": 0.3,   "face": [0.0, -125.0], "note": "step 7 (4.4): the Redneck, free of the trap, crawls to the gate through here ('Right!')"},
-    {"tag": "PL_GateKnock",     "x": 0.0,    "y": -126.5, "z": 0.3,   "face": [0.0, -125.0], "note": "step 8 (4.4): in front of the closed leaf - he pounds on the gate here"}
+    {"tag": "PL_GateKnock",     "x": 0.0,    "y": -126.5, "z": 0.3,   "face": [0.0, -125.0], "note": "step 8 (4.4): in front of the closed leaf - he pounds on the gate here"},
+    {"tag": "PL_RiderNearFence", "x": 29.0,  "y": -131.0, "z": 0.0,   "face": [26.3, -127.5], "note": "4.5: the Rider rides here on her monster once control passes to the Priest (~73 m from PL_RiderCrowd, ~73 s at 1 m/s) and waits; the side shot starts only when she is here"},
+    {"tag": "PL_RiderFenceBelow", "x": 26.3, "y": -127.5, "z": 0.0,   "face": [26.3, -125.0], "note": "4.5: in the side shot she rides the last metres to the fence here and gets off"},
+    {"tag": "PL_RiderOnFence",  "x": 26.3,   "y": -125.0, "z": 6.5,   "face": [0.0, -130.5], "keep_z": true, "note": "4.5: on top of the outer fence (6.5 m), east of the gate - the 'jump from the monster's back' stand-in (teleport); the lying Priest sees her here (4.6)"},
+    {"tag": "PL_PriestAtGate",  "x": 0.0,    "y": -130.5, "z": 0.3,   "face": [0.0, -175.0], "note": "4.5: the Priest's mark before the scene - 4 m in front of the Redneck, his back to him and to the gate"},
+    {"tag": "PL_RedneckOnGate", "x": 2.0,    "y": -125.0, "z": 7.5,   "face": [0.0, -131.0], "keep_z": true, "note": "4.5: on top of the closed gate leaf (PL_GateClosed, 7.5 m) - 'pushed off the Priest and jumped up', grins at him"},
+    {"tag": "PL_RedneckHidden", "x": 0.0,    "y": -108.0, "z": 0.3,   "face": [0.0, -88.0], "note": "4.5: behind the gate, between the outer and inner gates - he is hidden here until the tavern (Act IV)"}
   ],
   "bear_trap": {"label": "RTD_BearTrap_Gate", "x": 0.5, "y": -175.0, "z": 0.625,
     "note": "rtd_build_level.py places it from rtd_layout.json 20 cm under the road surface (0.585 m here) - lifted so its 8 cm disc shows"},

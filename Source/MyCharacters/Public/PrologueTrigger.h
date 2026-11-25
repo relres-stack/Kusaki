@@ -163,6 +163,28 @@ protected:
 	virtual FString DescribeCondition() const override;
 };
 
+// A staged scene has been playing at least this long, or has already finished (step 4.5). What heroes and monsters do
+// by the scenario lines up with the scene's shots exactly, however long the player's hero took to walk to his mark
+// before it: the Rider dismounts in the side shot, the Redneck jumps and the Priest falls in the next one. Seconds = 0:
+// as soon as the scene starts.
+UCLASS(meta = (DisplayName = "Scene reached a moment"))
+class MYCHARACTERS_API UPrologueTrigger_SceneTime : public UPrologueTrigger
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	TObjectPtr<class ULevelSequence> Scene;
+
+	// Seconds from the scene's start (its own timeline).
+	UPROPERTY(EditAnywhere, Category = "Trigger", meta = (ClampMin = "0.0"))
+	float Seconds = 0.0f;
+
+protected:
+	virtual bool Check(const APrologueDirector& Director) const override;
+	virtual FString DescribeCondition() const override;
+};
+
 // Two heroes are too far apart (step 2.9, a "Failure" condition): farther than MaxDistance, or — along the way to a
 // goal marker — hero A is more than MaxAhead in front of hero B or more than MaxBehind behind him. Step 12b: the Rider
 // must neither ride off ahead nor fall behind the Priest, or he is left without light.

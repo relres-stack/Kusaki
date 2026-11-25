@@ -220,6 +220,10 @@ public:
 	// The scene has played to its end (or was skipped) since the level started.
 	bool HasSceneFinished(const ULevelSequence* Scene) const;
 
+	// Step 4.5: seconds this scene has been playing (from its own start, not counting the player's walk to his mark).
+	// Below 0 = it is not playing and has not finished; a very large number once it has finished (or was skipped).
+	float GetSceneTime(const ULevelSequence* Scene) const;
+
 	UFUNCTION(BlueprintPure, Category = "Prologue|Scene")
 	bool IsScenePlaying() const { return bScenePlaying; }
 

@@ -590,6 +590,23 @@ bool APrologueDirector::HasSceneFinished(const ULevelSequence* Scene) const
 	return IsValid(Scene) && FinishedScenes.Contains(FSoftObjectPath(Scene));
 }
 
+float APrologueDirector::GetSceneTime(const ULevelSequence* Scene) const
+{
+	if (!IsValid(Scene))
+	{
+		return -1.0f;
+	}
+	if (HasSceneFinished(Scene))
+	{
+		return TNumericLimits<float>::Max();
+	}
+	if (!bScenePlaying || CurrentScene != Scene || !IsValid(ScenePlayer))
+	{
+		return -1.0f;
+	}
+	return static_cast<float>(ScenePlayer->GetCurrentTime().AsSeconds() - ScenePlayer->GetStartTime().AsSeconds());
+}
+
 void APrologueDirector::HandleSceneFinished()
 {
 	EndScene(false);
@@ -619,10 +636,16 @@ void APrologueDirector::EndScene(bool bSkipped)
 		Hero->SetAimSuppressed(!Hero->IsPlayerControlled());
 	}
 
-	// The monsters it stopped get their own AI back — unless a step has meanwhile put them into a group.
+	// The monsters it stopped get their own AI back — unless a step has meanwhile given them a role. A group with no
+	// role is on its own AI (step 9 of the Redneck start: "PriestPack"), so its members are let go too.
 	for (const TWeakObjectPtr<ABaseMonster>& Held : SceneHeldMonsters)
 	{
-		if (Held.IsValid() && FindMonsterGroupOf(Held.Get()).IsNone())
+		if (!Held.IsValid())
+		{
+			continue;
+		}
+		const FPrologueMonsterGroup* Group = MonsterGroups.Find(FindMonsterGroupOf(Held.Get()));
+		if (!Group || !IsValid(Group->Role))
 		{
 			ReleaseMonster(Held.Get());
 		}

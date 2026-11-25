@@ -126,14 +126,16 @@ def build():
     placed = 0
     for m in P.get("markers", []):
         x, y = m["x"], m["y"]
-        g = ground_z(x, y)
+        # keep_z: a marker on top of something (the fence, the gate leaf) keeps its json height - a ground trace would
+        # put it under the fence.
+        g = None if m.get("keep_z") else ground_z(x, y)
         z = (g if g is not None else m.get("z", 0.0)) + 0.05
         yaw = yaw_towards(x, y, m["face"]) if m.get("face") else 0.0
         a = actor_sub.spawn_actor_from_class(unreal.TargetPoint, vec(x, y, z), unreal.Rotator(roll=0.0, pitch=0.0, yaw=yaw))
         a.set_actor_label(m["tag"])
         a.set_folder_path(FOLDER)
         a.set_editor_property("tags", [unreal.Name(m["tag"])])
-        if g is None and not _TRACE_BROKEN:
+        if g is None and not _TRACE_BROKEN and not m.get("keep_z"):
             warn("marker %s: no ground under (%.1f, %.1f), using z = %.1f" % (m["tag"], x, y, z))
         placed += 1
     log("markers placed: %d" % placed)
