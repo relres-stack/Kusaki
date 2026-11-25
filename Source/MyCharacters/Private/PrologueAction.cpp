@@ -400,13 +400,18 @@ void UPrologueAction_LightItem::Execute(APrologueDirector& Director) const
 		}
 		UE_LOG(LogTemp, Warning, TEXT("Prologue: %s's %s is %s (fuel %.0f)"), *Hero->GetName(), *Item->GetName(),
 			Item->bIsLit ? TEXT("lit") : TEXT("out"), Item->FuelRemaining);
+		if (bOnlyOne)
+		{
+			break;
+		}
 	}
 }
 
 FString UPrologueAction_LightItem::Describe() const
 {
 	return FString::Printf(TEXT("%s %s his %s%s"), HeroId.IsNone() ? TEXT("player's hero") : *HeroId.ToString(),
-		bLight ? TEXT("lights") : TEXT("puts out"), ItemType == EHolyItemType::Censer ? TEXT("censer") : TEXT("candles"),
+		bLight ? TEXT("lights") : TEXT("puts out"),
+		ItemType == EHolyItemType::Censer ? TEXT("censer") : (bOnlyOne ? TEXT("candle (one)") : TEXT("candles")),
 		bLight && Fuel >= 0.0f ? *FString::Printf(TEXT(" (fuel set to %.0f)"), Fuel) : TEXT(""));
 }
 

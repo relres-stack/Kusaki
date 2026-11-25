@@ -395,6 +395,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Action")
 	float Fuel = -1.0f;
 
+	// Step 4.4: only one of them (the first found) — one of the Priest's two candles goes out, the other burns on.
+	UPROPERTY(EditAnywhere, Category = "Action")
+	bool bOnlyOne = false;
+
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;
 };

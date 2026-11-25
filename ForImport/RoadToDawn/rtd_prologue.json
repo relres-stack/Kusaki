@@ -35,7 +35,10 @@
     {"tag": "PL_TrapZone",      "x": 32.0, "y": -172.0, "z": -0.05},
     {"tag": "PL_TrapZone",      "x": 48.0, "y": -172.0, "z": 0.27},
     {"tag": "PL_TrapZone",      "x": -18.0, "y": -135.0, "z": 0.0},
-    {"tag": "PL_TrapZone",      "x": 18.0, "y": -135.0, "z": 0.0}
+    {"tag": "PL_TrapZone",      "x": 18.0, "y": -135.0, "z": 0.0},
+
+    {"tag": "PL_GateMid",       "x": 0.0,    "y": -150.0, "z": 0.3,   "face": [0.0, -125.0], "note": "step 7 (4.4): the Redneck, free of the trap, crawls to the gate through here ('Right!')"},
+    {"tag": "PL_GateKnock",     "x": 0.0,    "y": -126.5, "z": 0.3,   "face": [0.0, -125.0], "note": "step 8 (4.4): in front of the closed leaf - he pounds on the gate here"}
   ],
   "bear_trap": {"label": "RTD_BearTrap_Gate", "x": 0.5, "y": -175.0, "z": 0.625,
     "note": "rtd_build_level.py places it from rtd_layout.json 20 cm under the road surface (0.585 m here) - lifted so its 8 cm disc shows"},
