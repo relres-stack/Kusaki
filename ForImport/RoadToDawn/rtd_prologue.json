@@ -19,7 +19,11 @@
     {"tag": "PL_PriestStart",   "x": -135.0, "y": -125.0, "z": 5.47,  "face": [-70.0, -165.0], "note": "step 2: the Priest appears here (west of the village, by the south-west corner of the outer wall; slope ~8 deg - the first spot (-150, -95) was a 29 deg slope without nav-mesh)"},
     {"tag": "PL_PriestWait",    "x": -70.0,  "y": -165.0, "z": -0.52,  "face": [0.0, -175.0], "note": "west edge of the wasteland in front of the gate; he waits here"},
 
-    {"tag": "PL_NpcScene",      "x": 110.0,  "y": -230.0, "z": 1.52,  "face": [-141.4, -326.8], "note": "binocular shot 2: a monster at the edge of the shadow knocks down an NPC (scene's own stand-ins)"}
+    {"tag": "PL_NpcScene",      "x": 110.0,  "y": -230.0, "z": 1.52,  "face": [-141.4, -326.8], "note": "binocular shot 2: a monster at the edge of the shadow knocks down an NPC (scene's own stand-ins)"},
+
+    {"tag": "PL_Wasteland",     "x": 0.0,    "y": -208.0, "z": 3.93,   "note": "step 4: the wasteland in front of the gate - on the road right after its last bend (zone radius is in the trigger, 12 m); before the bear trap at y = -175"},
+    {"tag": "PL_Wasteland",     "x": -35.0,  "y": -205.0, "z": 6.18,   "note": "same zone, west side (coming down off the road)"},
+    {"tag": "PL_Wasteland",     "x": 35.0,   "y": -205.0, "z": 1.87,   "note": "same zone, east side"}
   ],
   "navmesh_extra": [
     {"label": "RTD_NavMeshBounds_River", "x": 192.5, "y": -240.0, "w": 85.0, "d": 240.0, "note": "the main nav-mesh ends at x = 190; the Rider runs along the river bank (x 170-205)"}
