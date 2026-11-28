@@ -121,9 +121,11 @@ public:
 	bool bShowDebug = true;
 
 	// Passes control to the hero HeroId. Returns false (and logs why) if that hero does not exist, is dead, or
-	// is already the one the player controls. Instant cut for now; the camera switch scene comes in stage 3.
+	// is already the one the player controls. CameraBlend (step 4.6): seconds the view glides from what the player
+	// saw to the new hero's camera; 0 = a straight cut. A hero leaving the player's control drops his screen-wide
+	// effects first (the Priest's inflamed vision is turned off): they would stay on the new hero's screen.
 	UFUNCTION(BlueprintCallable, Category = "Prologue")
-	bool SwitchControlTo(FName HeroId);
+	bool SwitchControlTo(FName HeroId, float CameraBlend = 0.0f);
 
 	// Spawns hero HeroId at Where and puts it under AI. If that hero already exists, returns the existing one
 	// and does not move it.
@@ -181,6 +183,10 @@ public:
 	// picked again go back to their own AI), and a monster picked away from another group leaves that group. Returns
 	// how many were picked. If the group already has a role, the new members take it at once.
 	int32 SelectMonsterGroup(FName GroupName, const FPrologueMonsterSelection& Selection);
+
+	// The monsters Selection picks, nearest first (living, not ridden; with Selection.bSkipOtherGroups, none from a group
+	// other than ForGroup). Shared by SelectMonsterGroup() and "Place monsters at marker" (step 4.8).
+	TArray<ABaseMonster*> FindMonsters(const FPrologueMonsterSelection& Selection, FName ForGroup) const;
 
 	// Gives group GroupName a role: their own AI is switched off and the role drives them every frame. Null = they go
 	// back to their own AI, the group keeps its members. Duration > 0: the role ends by itself after that many
@@ -240,6 +246,10 @@ public:
 	FOnPrologueHeroSwitched OnHeroSwitched;
 
 protected:
+	// Step 4.8: a prologue that starts at a later step (a restart from a checkpoint, or DebugStartStep) skips the level's
+	// opening scene: its public bPlayOnBeginPlay is switched off here, before any actor's BeginPlay(). AIntroSceneDirector
+	// itself is not changed.
+	virtual void PostInitializeComponents() override;
 	virtual void BeginPlay() override;
 
 private:
@@ -315,6 +325,10 @@ private:
 	UFUNCTION()
 	void HandleSceneFinished();
 	void EndScene(bool bSkipped);
+
+	// The view glides from the shot From to the camera of the hero the player controls now: a temporary camera stands
+	// exactly at From, then the engine blends from it to the hero (end of a scene, step 3.4; control switch, step 4.6).
+	void GlideViewToPlayerHero(const FMinimalViewInfo& From, float Seconds, const TCHAR* Why);
 
 	// The scene itself (after the player's hero is on his mark, or right away).
 	bool StartScenePlayback(ULevelSequence* Scene);

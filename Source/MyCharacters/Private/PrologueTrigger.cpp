@@ -5,7 +5,10 @@
 #include "BaseCharacter.h"
 #include "BaseMonster.h"
 #include "BinocularsPickup.h"
+#include "Components/CapsuleComponent.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/World.h"
+#include "GameFramework/Controller.h"
 #include "EngineUtils.h"
 #include "FingerFlamePeekComponent.h"
 #include "Components/ScriptedKnockdownComponent.h"
@@ -350,6 +353,140 @@ FString UPrologueTrigger_HeroesApart::DescribeCondition() const
 	}
 	return FString::Printf(TEXT("%s and %s apart: %s"), *HeroName(HeroA), *HeroName(HeroB),
 		Parts.Num() > 0 ? *FString::Join(Parts, TEXT(" or ")) : TEXT("(no limit set)"));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Hero sees hero
+
+bool UPrologueTrigger_HeroSeesHero::IsPointInView(const FVector& ViewLocation, const FVector& ViewDirection, const FVector& Point,
+	float MaxAngleDeg, float MaxDist)
+{
+	const FVector Dir = ViewDirection.GetSafeNormal();
+	if (Dir.IsNearlyZero())
+	{
+		return false;
+	}
+	const FVector ToPoint = Point - ViewLocation;
+	const float Dist = ToPoint.Size();
+	if (Dist <= KINDA_SMALL_NUMBER)
+	{
+		return true;
+	}
+	if (MaxDist > 0.0f && Dist > MaxDist)
+	{
+		return false;
+	}
+	return FVector::DotProduct(ToPoint / Dist, Dir) >= FMath::Cos(FMath::DegreesToRadians(MaxAngleDeg));
+}
+
+bool UPrologueTrigger_HeroSeesHero::GetView(const APrologueDirector& Director, const ABaseCharacter*& OutViewer,
+	const ABaseCharacter*& OutTarget, FVector& OutLocation, FRotator& OutRotation) const
+{
+	OutViewer = Director.ResolveHero(ViewerId);
+	OutTarget = Director.ResolveHero(TargetId);
+	if (!IsValid(OutViewer) || !IsValid(OutTarget) || OutViewer == OutTarget)
+	{
+		return false;
+	}
+	// The player's controller answers with the camera on screen, an AI controller with the hero's eyes.
+	if (const AController* Controller = OutViewer->GetController())
+	{
+		Controller->GetPlayerViewPoint(OutLocation, OutRotation);
+	}
+	else
+	{
+		OutViewer->GetActorEyesViewPoint(OutLocation, OutRotation);
+	}
+	return true;
+}
+
+void UPrologueTrigger_HeroSeesHero::GetTargetPoints(const ABaseCharacter& Target, FVector& OutBody, FVector& OutHead)
+{
+	OutBody = Target.GetActorLocation();
+	const UCapsuleComponent* Capsule = Target.GetCapsuleComponent();
+	const float HalfHeight = IsValid(Capsule) ? Capsule->GetScaledCapsuleHalfHeight() : 90.0f;
+	OutHead = OutBody + FVector(0.0f, 0.0f, HalfHeight * 0.8f);
+}
+
+bool UPrologueTrigger_HeroSeesHero::IsLineClear(const ABaseCharacter& Viewer, const ABaseCharacter& Target, const FVector& From,
+	const FVector& Point) const
+{
+	const UWorld* World = Viewer.GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(PrologueHeroSeesHero), false);
+	Params.AddIgnoredActor(&Viewer);
+	Params.AddIgnoredActor(&Target);
+	// What they carry (candles, the censer, the vision's fire on the Priest's fingers) does not hide anything.
+	TArray<AActor*> Attached;
+	Viewer.GetAttachedActors(Attached);
+	Target.GetAttachedActors(Attached, false);
+	Params.AddIgnoredActors(Attached);
+
+	// By object type: walls and props block; pawns (monsters, heroes) are not in the query at all.
+	FCollisionObjectQueryParams Objects;
+	Objects.AddObjectTypesToQuery(ECC_WorldStatic);
+	Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+	FHitResult Hit;
+	return !World->LineTraceSingleByObjectType(Hit, From, Point, Objects, Params);
+}
+
+bool UPrologueTrigger_HeroSeesHero::Check(const APrologueDirector& Director) const
+{
+	const ABaseCharacter* Viewer = nullptr;
+	const ABaseCharacter* Target = nullptr;
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	if (!GetView(Director, Viewer, Target, ViewLocation, ViewRotation))
+	{
+		return false;
+	}
+	FVector Body, Head;
+	GetTargetPoints(*Target, Body, Head);
+	const FVector Points[] = { Head, Body };
+	for (const FVector& Point : Points)
+	{
+		if (IsPointInView(ViewLocation, ViewRotation.Vector(), Point, MaxAngle, MaxDistance)
+			&& (!bNeedClearView || IsLineClear(*Viewer, *Target, ViewLocation, Point)))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UPrologueTrigger_HeroSeesHero::DrawDebug(const APrologueDirector& Director) const
+{
+	const ABaseCharacter* Viewer = nullptr;
+	const ABaseCharacter* Target = nullptr;
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	if (!GetView(Director, Viewer, Target, ViewLocation, ViewRotation))
+	{
+		return;
+	}
+	FVector Body, Head;
+	GetTargetPoints(*Target, Body, Head);
+	const FVector ToHead = (Head - ViewLocation).GetSafeNormal();
+	const float AngleDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(ToHead, ViewRotation.Vector()), -1.0f, 1.0f)));
+	const bool bMet = Check(Director);
+	const FColor Color = bMet ? FColor::Green : FColor::Orange;
+	// From the viewer's body, not from the camera: a line starting in the camera itself would not be seen.
+	const FVector Start = Viewer->GetActorLocation() + FVector(0.0f, 0.0f, 40.0f);
+	DrawDebugLine(Director.GetWorld(), Start, Head, Color, false, -1.0f, 0, 2.0f);
+	DrawDebugSphere(Director.GetWorld(), Head, 25.0f, 8, Color, false, -1.0f, 0, 1.5f);
+	DrawDebugString(Director.GetWorld(), Head + FVector(0.0f, 0.0f, 40.0f),
+		FString::Printf(TEXT("%s: %.0f deg (max %.0f), %.1f m"), *HeroName(ViewerId), AngleDeg, MaxAngle, FVector::Dist(ViewLocation, Head) / 100.0f),
+		nullptr, Color, 0.0f, true, 1.1f);
+}
+
+FString UPrologueTrigger_HeroSeesHero::DescribeCondition() const
+{
+	return FString::Printf(TEXT("%s sees %s (within %.0f deg%s%s)"), *HeroName(ViewerId), *HeroName(TargetId), MaxAngle,
+		MaxDistance > 0.0f ? *FString::Printf(TEXT(", %.0f m"), MaxDistance / 100.0f) : TEXT(""),
+		bNeedClearView ? TEXT(", clear view") : TEXT(""));
 }
 
 // ---------------------------------------------------------------------------------------------------------------

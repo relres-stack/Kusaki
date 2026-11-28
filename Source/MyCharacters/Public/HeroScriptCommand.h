@@ -114,6 +114,16 @@ enum class EHeroScriptMoveSpeed : uint8
 	Custom			UMETA(DisplayName = "Custom speed (crawl, limp)"),
 };
 
+// Which way the hero faces while he walks (step 4.8).
+UENUM(BlueprintType)
+enum class EHeroScriptMoveFacing : uint8
+{
+	Forward			UMETA(DisplayName = "Where he goes (normal)"),
+	// Back first, facing the way he came: the Priest retreating to the fence, facing the monsters.
+	Backwards		UMETA(DisplayName = "Backwards (back first)"),
+	Target			UMETA(DisplayName = "Toward a target"),
+};
+
 // Walks, runs or crawls to the target along the navmesh. Moving targets (heroes, monsters) are followed.
 UCLASS(meta = (DisplayName = "Move to"))
 class MYCHARACTERS_API UHeroScriptCommand_MoveTo : public UHeroScriptCommand
@@ -145,6 +155,20 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Command")
 	bool bTeleportIfStuck = true;
 
+	// Step 4.8: which way he faces on the way. Normal = where he goes. Backwards / toward a target: he is turned by the
+	// command, not by his movement (the hero's "turn to where I move" is switched off for the move and put back after).
+	// Not for riding (the monster turns the way it goes). The walk animation is the usual one: it may look like walking
+	// forward while he moves back, until there is a back-walk animation.
+	UPROPERTY(EditAnywhere, Category = "Command")
+	EHeroScriptMoveFacing Facing = EHeroScriptMoveFacing::Forward;
+
+	UPROPERTY(EditAnywhere, Category = "Command", meta = (EditCondition = "Facing == EHeroScriptMoveFacing::Target", EditConditionHides))
+	FHeroScriptTarget FaceTarget;
+
+	// Degrees per second he turns to face that way.
+	UPROPERTY(EditAnywhere, Category = "Command", meta = (ClampMin = "30.0", EditCondition = "Facing != EHeroScriptMoveFacing::Forward", EditConditionHides))
+	float FacingTurnSpeed = 270.0f;
+
 	virtual void Start(UHeroScriptRunner& Runner) override;
 	virtual EHeroScriptCommandStatus Tick(UHeroScriptRunner& Runner, float DeltaSeconds) override;
 	virtual void End(UHeroScriptRunner& Runner, bool bInterrupted) override;
@@ -153,7 +177,24 @@ public:
 	virtual void DrawDebug(const UHeroScriptRunner& Runner) const override;
 	virtual bool CanRunWhileDown() const override { return false; }
 
+	// The yaw he should face (Facing): Backwards = opposite to MoveDirection, Target = toward TargetLocation. False for
+	// Forward, or when there is no direction yet. Pure, for the automation test.
+	static bool ComputeFacingYaw(EHeroScriptMoveFacing Facing, const FVector& HeroLocation, const FVector& MoveDirection,
+		const FVector& TargetLocation, float& OutYaw);
+
 private:
+	// Facing: turns him toward the wanted yaw, at most FacingTurnSpeed this frame.
+	void UpdateFacing(UHeroScriptRunner& Runner, float DeltaSeconds);
+	bool bFacingOverridden = false;
+	bool bSavedOrientToMovement = false;
+	bool bSavedUseControllerDesiredRotation = false;
+	bool bSavedUseControllerRotationYaw = false;
+	// The flags above are not enough: ABaseCharacter::Tick() puts bOrientRotationToMovement back every frame (aiming).
+	// With the movement's turn rate at zero for the move, nothing but UpdateFacing() turns him.
+	FRotator SavedRotationRate = FRotator::ZeroRotator;
+	// The way he walks (flat): his velocity while he moves, the straight line to the goal until he does.
+	FVector MoveDirection = FVector::ZeroVector;
+
 	void RequestMove(UHeroScriptRunner& Runner);
 	void GiveUp(UHeroScriptRunner& Runner);
 	void HandleMoveFinished(FAIRequestID RequestID, const FPathFollowingResult& Result);

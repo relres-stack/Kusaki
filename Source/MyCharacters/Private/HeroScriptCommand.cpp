@@ -105,7 +105,87 @@ void UHeroScriptCommand_MoveTo::Start(UHeroScriptRunner& Runner)
 	{
 		Hero->PlayAnimMontage(LoopMontage);
 	}
+
+	// Step 4.8: he is turned by UpdateFacing(), so nothing else may turn him while he walks; put back in End().
+	if (Facing != EHeroScriptMoveFacing::Forward && MoveComp)
+	{
+		bSavedOrientToMovement = MoveComp->bOrientRotationToMovement;
+		bSavedUseControllerDesiredRotation = MoveComp->bUseControllerDesiredRotation;
+		bSavedUseControllerRotationYaw = Hero->bUseControllerRotationYaw;
+		SavedRotationRate = MoveComp->RotationRate;
+		MoveComp->bOrientRotationToMovement = false;
+		MoveComp->bUseControllerDesiredRotation = false;
+		Hero->bUseControllerRotationYaw = false;
+		// ABaseCharacter::Tick() turns "face where I move" back on every frame (it follows aiming): with no turn rate the
+		// movement cannot turn him anyway. Found in PIE 27.11.2026 — without it he walked face first.
+		MoveComp->RotationRate = FRotator::ZeroRotator;
+		bFacingOverridden = true;
+		// Until he moves, "the way he walks" is the straight line to the goal: he turns his back to it at once.
+		AActor* GoalActor = nullptr;
+		FVector GoalLocation;
+		if (Runner.ResolveTarget(Target, GoalActor, GoalLocation))
+		{
+			MoveDirection = (GoalLocation - Hero->GetActorLocation()).GetSafeNormal2D();
+		}
+	}
 	RequestMove(Runner);
+}
+
+bool UHeroScriptCommand_MoveTo::ComputeFacingYaw(EHeroScriptMoveFacing InFacing, const FVector& HeroLocation, const FVector& InMoveDirection,
+	const FVector& TargetLocation, float& OutYaw)
+{
+	FVector Direction = FVector::ZeroVector;
+	switch (InFacing)
+	{
+	case EHeroScriptMoveFacing::Backwards:
+		Direction = -InMoveDirection;
+		break;
+	case EHeroScriptMoveFacing::Target:
+		Direction = TargetLocation - HeroLocation;
+		break;
+	default:
+		return false;
+	}
+	Direction.Z = 0.0f;
+	if (!Direction.Normalize())
+	{
+		return false;
+	}
+	OutYaw = Direction.Rotation().Yaw;
+	return true;
+}
+
+void UHeroScriptCommand_MoveTo::UpdateFacing(UHeroScriptRunner& Runner, float DeltaSeconds)
+{
+	ABaseCharacter* Hero = Runner.GetHero();
+	if (!bFacingOverridden || !IsValid(Hero))
+	{
+		return;
+	}
+	// The way he really walks (path corners included); kept while he stands for a moment.
+	const FVector Velocity = Hero->GetVelocity().GetSafeNormal2D();
+	if (Hero->GetVelocity().SizeSquared2D() > FMath::Square(20.0f))
+	{
+		MoveDirection = Velocity;
+	}
+	FVector TargetLocation = FVector::ZeroVector;
+	if (Facing == EHeroScriptMoveFacing::Target)
+	{
+		AActor* FaceActor = nullptr;
+		if (!Runner.ResolveTarget(FaceTarget, FaceActor, TargetLocation))
+		{
+			return;
+		}
+	}
+	float WantedYaw = 0.0f;
+	if (!ComputeFacingYaw(Facing, Hero->GetActorLocation(), MoveDirection, TargetLocation, WantedYaw))
+	{
+		return;
+	}
+	const float Yaw = Hero->GetActorRotation().Yaw;
+	const float Delta = FMath::FindDeltaAngleDegrees(Yaw, WantedYaw);
+	const float MaxStep = FacingTurnSpeed * DeltaSeconds;
+	Hero->SetActorRotation(FRotator(0.0f, Yaw + FMath::Clamp(Delta, -MaxStep, MaxStep), 0.0f));
 }
 
 void UHeroScriptCommand_MoveTo::RequestMove(UHeroScriptRunner& Runner)
@@ -202,6 +282,7 @@ EHeroScriptCommandStatus UHeroScriptCommand_MoveTo::Tick(UHeroScriptRunner& Runn
 	{
 		return TickRiding(Runner);
 	}
+	UpdateFacing(Runner, DeltaSeconds);
 
 	// Stuck: moving (maybe even fast, circling under a path point he cannot reach) but no closer to the target.
 	const double Now = Runner.GetWorldTime();
@@ -355,10 +436,10 @@ void UHeroScriptCommand_MoveTo::RideGiveUp(UHeroScriptRunner& Runner, ABaseMonst
 	Destination = (Nav && Nav->ProjectPointToNavigation(GoalLocation, OnNavmesh, FVector(200.0f, 200.0f, 400.0f)))
 		? OnNavmesh.Location + FVector(0.0f, 0.0f, HalfHeight)
 		: GoalLocation + FVector(0.0f, 0.0f, HalfHeight);
-	const FRotator Facing(0.0f, (GoalLocation - Mount->GetActorLocation()).GetSafeNormal2D().Rotation().Yaw, 0.0f);
-	if (!Mount->TeleportTo(Destination, Facing))
+	const FRotator PutFacing(0.0f, (GoalLocation - Mount->GetActorLocation()).GetSafeNormal2D().Rotation().Yaw, 0.0f);
+	if (!Mount->TeleportTo(Destination, PutFacing))
 	{
-		Mount->SetActorLocationAndRotation(Destination, Facing, false, nullptr, ETeleportType::TeleportPhysics);
+		Mount->SetActorLocationAndRotation(Destination, PutFacing, false, nullptr, ETeleportType::TeleportPhysics);
 	}
 	const FString Message = FString::Printf(TEXT("Prologue: %s's monster got stuck on the way to %s and was put there (fix the navmesh/level at %s)"),
 		*Runner.GetHeroName(), *Target.Describe(), *Mount->GetActorLocation().ToCompactString());
@@ -404,10 +485,10 @@ void UHeroScriptCommand_MoveTo::GiveUp(UHeroScriptRunner& Runner)
 	{
 		AI->StopMovement();
 	}
-	const FRotator Facing(0.0f, (GoalLocation - Destination).GetSafeNormal2D().Rotation().Yaw, 0.0f);
-	if (!Hero->TeleportTo(Destination, Facing))
+	const FRotator PutFacing(0.0f, (GoalLocation - Destination).GetSafeNormal2D().Rotation().Yaw, 0.0f);
+	if (!Hero->TeleportTo(Destination, PutFacing))
 	{
-		Hero->SetActorLocationAndRotation(Destination, Facing, false, nullptr, ETeleportType::TeleportPhysics);
+		Hero->SetActorLocationAndRotation(Destination, PutFacing, false, nullptr, ETeleportType::TeleportPhysics);
 	}
 	bArrived = true;
 
@@ -497,14 +578,27 @@ void UHeroScriptCommand_MoveTo::End(UHeroScriptRunner& Runner, bool bInterrupted
 	{
 		Hero->StopAnimMontage(LoopMontage);
 	}
+	if (bFacingOverridden && MoveComp)
+	{
+		MoveComp->bOrientRotationToMovement = bSavedOrientToMovement;
+		MoveComp->bUseControllerDesiredRotation = bSavedUseControllerDesiredRotation;
+		Hero->bUseControllerRotationYaw = bSavedUseControllerRotationYaw;
+		if (MoveComp->RotationRate.IsZero())
+		{
+			MoveComp->RotationRate = SavedRotationRate;
+		}
+		bFacingOverridden = false;
+	}
 }
 
 FString UHeroScriptCommand_MoveTo::Describe() const
 {
 	const TCHAR* How = Speed == EHeroScriptMoveSpeed::Run ? TEXT("run") : Speed == EHeroScriptMoveSpeed::Custom ? TEXT("crawl") : TEXT("walk");
+	const FString Way = Facing == EHeroScriptMoveFacing::Backwards ? TEXT(", backwards")
+		: Facing == EHeroScriptMoveFacing::Target ? FString::Printf(TEXT(", facing %s"), *FaceTarget.Describe()) : FString();
 	return Speed == EHeroScriptMoveSpeed::Custom
-		? FString::Printf(TEXT("%s to %s at %.0f"), How, *Target.Describe(), CustomSpeed)
-		: FString::Printf(TEXT("%s to %s"), How, *Target.Describe());
+		? FString::Printf(TEXT("%s to %s at %.0f%s"), How, *Target.Describe(), CustomSpeed, *Way)
+		: FString::Printf(TEXT("%s to %s%s"), How, *Target.Describe(), *Way);
 }
 
 FString UHeroScriptCommand_MoveTo::DescribeProgress(const UHeroScriptRunner& Runner) const

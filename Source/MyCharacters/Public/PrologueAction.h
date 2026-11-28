@@ -77,7 +77,8 @@ public:
 	virtual FString Describe() const override;
 };
 
-// Control passes to a hero (instant cut for now; the camera switch scene comes with stage 3).
+// Control passes to a hero. For a staged switch scene use "Play scene" with "Switch Control At End"; this one is for a
+// switch without a scene (step 4.6: the Priest sees the Rider through his vision, the camera flies over to her).
 UCLASS(meta = (DisplayName = "Switch control to hero"))
 class MYCHARACTERS_API UPrologueAction_SwitchControl : public UPrologueAction
 {
@@ -86,6 +87,10 @@ class MYCHARACTERS_API UPrologueAction_SwitchControl : public UPrologueAction
 public:
 	UPROPERTY(EditAnywhere, Category = "Action")
 	FName HeroId;
+
+	// Seconds the view glides from what the player saw to the new hero's camera. 0 = a straight cut.
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0.0"))
+	float CameraBlend = 0.0f;
 
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;
@@ -369,6 +374,38 @@ public:
 
 	virtual void Execute(APrologueDirector& Director) const override;
 	virtual FString Describe() const override;
+};
+
+// Step 4.8 (mostly for checkpoint setups): monsters are put at a marker as if they had come there. After a restart from a
+// checkpoint the level's monsters stand where the level placed them, far away; this brings the crowd around the heroes at
+// once and gives the Rider a monster right next to her to get on. Picks monsters like "Monster group: role" does (nearest
+// to a hero first, never a ridden one) and sets them in a ring around the marker on the navmesh, facing its centre (one
+// monster with no ring: on the marker, facing its way). Their own AI or their group's role goes on from there.
+UCLASS(meta = (DisplayName = "Place monsters at marker"))
+class MYCHARACTERS_API UPrologueAction_PlaceMonsters : public UPrologueAction
+{
+	GENERATED_BODY()
+
+public:
+	// The actor with this tag (the first one found).
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FName MarkerTag;
+
+	// Which monsters (Radius 0 = from anywhere in the level).
+	UPROPERTY(EditAnywhere, Category = "Action")
+	FPrologueMonsterSelection Selection;
+
+	// cm. 0 = on the marker itself (meant for one monster).
+	UPROPERTY(EditAnywhere, Category = "Action", meta = (ClampMin = "0.0"))
+	float RingRadius = 0.0f;
+
+	virtual void Execute(APrologueDirector& Director) const override;
+	virtual FString Describe() const override;
+	virtual void DrawDebug(const APrologueDirector& Director) const override;
+
+	// Where monster Index of Count stands around Center (flat ring starting at the marker's facing; one monster or no
+	// ring = the centre itself), before the navmesh projection. Pure, for the automation test.
+	static FVector RingPoint(const FVector& Center, float StartYaw, float Radius, int32 Index, int32 Count);
 };
 
 // Lights or puts out a hero's held item (step 2.11: the Priest gets up and lights his censer with little oil left).

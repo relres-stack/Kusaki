@@ -16,6 +16,8 @@
 #include "Engine/Engine.h"
 #include "BearTrap.h"
 #include "EngineUtils.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "NavigationSystem.h"
 #include "PrologueDirector.h"
 #include "PrologueTrigger.h"
 
@@ -51,12 +53,14 @@ FString UPrologueAction_AppearHero::Describe() const
 
 void UPrologueAction_SwitchControl::Execute(APrologueDirector& Director) const
 {
-	Director.SwitchControlTo(HeroId);
+	Director.SwitchControlTo(HeroId, CameraBlend);
 }
 
 FString UPrologueAction_SwitchControl::Describe() const
 {
-	return FString::Printf(TEXT("control to %s"), *HeroId.ToString());
+	return CameraBlend > 0.0f
+		? FString::Printf(TEXT("control to %s (camera glides %.1f s)"), *HeroId.ToString(), CameraBlend)
+		: FString::Printf(TEXT("control to %s"), *HeroId.ToString());
 }
 
 void UPrologueAction_HeroScript::Execute(APrologueDirector& Director) const
@@ -369,6 +373,114 @@ void UPrologueAction_SpringTrap::Execute(APrologueDirector& Director) const
 FString UPrologueAction_SpringTrap::Describe() const
 {
 	return FString::Printf(TEXT("bear trap springs on %s"), HeroId.IsNone() ? TEXT("player's hero") : *HeroId.ToString());
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Place monsters at marker (step 4.8)
+
+namespace PrologueMarks
+{
+	// The first actor with Tag, or null.
+	AActor* FindFirst(const UObject* WorldContext, FName Tag)
+	{
+		if (Tag.IsNone())
+		{
+			return nullptr;
+		}
+		TArray<AActor*> Marks;
+		UGameplayStatics::GetAllActorsWithTag(WorldContext, Tag, Marks);
+		for (AActor* Mark : Marks)
+		{
+			if (IsValid(Mark))
+			{
+				return Mark;
+			}
+		}
+		return nullptr;
+	}
+}
+
+FVector UPrologueAction_PlaceMonsters::RingPoint(const FVector& Center, float StartYaw, float Radius, int32 Index, int32 Count)
+{
+	if (Radius <= 0.0f || Count <= 0)
+	{
+		return Center;
+	}
+	const float Yaw = StartYaw + 360.0f * static_cast<float>(Index) / static_cast<float>(Count);
+	return Center + FRotator(0.0f, Yaw, 0.0f).Vector() * Radius;
+}
+
+void UPrologueAction_PlaceMonsters::Execute(APrologueDirector& Director) const
+{
+	UWorld* World = Director.GetWorld();
+	const AActor* Mark = PrologueMarks::FindFirst(&Director, MarkerTag);
+	if (!World || !IsValid(Mark))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: '%s' skipped - no marker with tag '%s'"), *Describe(), *MarkerTag.ToString());
+		return;
+	}
+
+	const TArray<ABaseMonster*> Monsters = Director.FindMonsters(Selection, NAME_None);
+	const FVector Center = Mark->GetActorLocation();
+	const float StartYaw = Mark->GetActorRotation().Yaw;
+	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+
+	for (int32 Index = 0; Index < Monsters.Num(); ++Index)
+	{
+		ABaseMonster* Monster = Monsters[Index];
+		FVector Point = RingPoint(Center, StartYaw, RingRadius, Index, Monsters.Num());
+		// Onto the navmesh, so its AI or role can walk on from there; then the capsule's half height above it.
+		FNavLocation OnNav;
+		if (Nav && Nav->ProjectPointToNavigation(Point, OnNav, FVector(200.0f, 200.0f, 500.0f)))
+		{
+			Point = OnNav.Location;
+		}
+		const float HalfHeight = Monster->GetCapsuleComponent() ? Monster->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 90.0f;
+		Point.Z += HalfHeight + 2.0f;
+
+		const FVector ToCenter = Center - Point;
+		const float Yaw = ToCenter.SizeSquared2D() > FMath::Square(10.0f) ? ToCenter.Rotation().Yaw : StartYaw;
+
+		if (AAIController* AI = Cast<AAIController>(Monster->GetController()))
+		{
+			AI->StopMovement();
+		}
+		Monster->TeleportTo(Point, FRotator(0.0f, Yaw, 0.0f));
+		if (UCharacterMovementComponent* Move = Monster->GetCharacterMovement())
+		{
+			Move->StopMovementImmediately();
+		}
+	}
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: %d monster(s) put at marker '%s'%s"), Monsters.Num(), *MarkerTag.ToString(),
+		RingRadius > 0.0f ? *FString::Printf(TEXT(" in a ring of %.1f m"), RingRadius / 100.0f) : TEXT(""));
+}
+
+FString UPrologueAction_PlaceMonsters::Describe() const
+{
+	return FString::Printf(TEXT("%s monster(s) put at marker '%s'%s"),
+		Selection.MaxCount > 0 ? *FString::FromInt(Selection.MaxCount) : TEXT("all matching"), *MarkerTag.ToString(),
+		RingRadius > 0.0f ? *FString::Printf(TEXT(" (ring %.1f m)"), RingRadius / 100.0f) : TEXT(""));
+}
+
+void UPrologueAction_PlaceMonsters::DrawDebug(const APrologueDirector& Director) const
+{
+	UWorld* World = Director.GetWorld();
+	const AActor* Mark = PrologueMarks::FindFirst(&Director, MarkerTag);
+	if (!World || !IsValid(Mark))
+	{
+		return;
+	}
+	const FVector Center = Mark->GetActorLocation();
+	if (RingRadius > 0.0f)
+	{
+		DrawDebugCircle(World, Center + FVector(0.0f, 0.0f, 20.0f), RingRadius, 32, FColor::Purple, false, -1.0f, 0, 4.0f,
+			FVector(1.0f, 0.0f, 0.0f), FVector(0.0f, 1.0f, 0.0f), false);
+	}
+	else
+	{
+		DrawDebugSphere(World, Center, 60.0f, 8, FColor::Purple, false, -1.0f, 0, 2.0f);
+	}
+	DrawDebugString(World, Center + FVector(0.0f, 0.0f, 150.0f), Describe(), nullptr, FColor::Purple, 0.0f, true);
 }
 
 void UPrologueAction_LightItem::Execute(APrologueDirector& Director) const

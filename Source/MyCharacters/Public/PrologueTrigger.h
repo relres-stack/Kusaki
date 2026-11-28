@@ -229,6 +229,60 @@ private:
 	bool GetAlongGoal(const APrologueDirector& Director, float& OutAhead) const;
 };
 
+// One hero sees another (step 4.6, scenario step 11): the target is within MaxAngle of the centre of the viewer's view and
+// nothing solid stands between them. The view is the viewer's controller's view point: for the player's hero that is the
+// camera on screen (the first-person one while the Priest's inflamed vision is on), for a hero under AI his eyes.
+// "The lying Priest sees the Rider on the fence through his vision" = "All of": this + "Hero state: Inflamed vision".
+UCLASS(meta = (DisplayName = "Hero sees hero"))
+class MYCHARACTERS_API UPrologueTrigger_HeroSeesHero : public UPrologueTrigger
+{
+	GENERATED_BODY()
+
+public:
+	// Who looks. Empty = the hero the player controls.
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	FName ViewerId = TEXT("Priest");
+
+	// Who must be seen.
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	FName TargetId = TEXT("Rider");
+
+	// Degrees from the centre of the view. About 12 = "looking right at her"; 30+ = anywhere near the middle of the screen.
+	UPROPERTY(EditAnywhere, Category = "Trigger", meta = (ClampMin = "1.0", ClampMax = "90.0"))
+	float MaxAngle = 12.0f;
+
+	// cm. 0 = any distance.
+	UPROPERTY(EditAnywhere, Category = "Trigger", meta = (ClampMin = "0.0"))
+	float MaxDistance = 0.0f;
+
+	// Walls, the fence and props block the view. Monsters and heroes do not: the crowd around the lying Priest would
+	// hide everything.
+	UPROPERTY(EditAnywhere, Category = "Trigger")
+	bool bNeedClearView = true;
+
+	virtual void DrawDebug(const APrologueDirector& Director) const override;
+
+	// The pure part of the check (automation test): Point is within MaxAngleDeg of ViewDirection seen from ViewLocation
+	// and, if MaxDist > 0, no farther than MaxDist.
+	static bool IsPointInView(const FVector& ViewLocation, const FVector& ViewDirection, const FVector& Point, float MaxAngleDeg, float MaxDist);
+
+protected:
+	virtual bool Check(const APrologueDirector& Director) const override;
+	virtual FString DescribeCondition() const override;
+
+private:
+	// The viewer's view point (see the class comment). False if there is no viewer or no target.
+	bool GetView(const APrologueDirector& Director, const ABaseCharacter*& OutViewer, const ABaseCharacter*& OutTarget,
+		FVector& OutLocation, FRotator& OutRotation) const;
+
+	// The target's points that count (body centre, head): seeing any one of them is enough.
+	static void GetTargetPoints(const ABaseCharacter& Target, FVector& OutBody, FVector& OutHead);
+
+	// Nothing solid (static or dynamic world geometry) between the view and Point; pawns and the two heroes' attached
+	// actors are ignored.
+	bool IsLineClear(const ABaseCharacter& Viewer, const ABaseCharacter& Target, const FVector& From, const FVector& Point) const;
+};
+
 // The hero rides a monster of a group (step 2.8c): "the Rider has mounted the monster sitting on the Priest" (step 12).
 // The monster leaves its group the moment it is ridden; the director remembers where it came from.
 UCLASS(meta = (DisplayName = "Hero rides a monster of a group"))

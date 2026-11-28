@@ -14,6 +14,7 @@
 #include "HolyItem.h"
 #include "Components/HeroScriptRunner.h"
 #include "Components/ScriptedKnockdownComponent.h"
+#include "Components/VisionFireSourceComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -43,6 +44,34 @@ APrologueDirector::APrologueDirector()
 	// first cut in the same frame, so the first shot never flashes.
 	PrimaryActorTick.TickGroup = TG_PostPhysics;
 	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
+}
+
+void APrologueDirector::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+
+	UWorld* World = GetWorld();
+	if (!World || !World->IsGameWorld() || !bRunOnBeginPlay || !Scenario)
+	{
+		return;
+	}
+	const UPrologueCheckpointSubsystem* Checkpoints = GetCheckpoints();
+	const bool bFromCheckpoint = Checkpoints && Scenario->Steps.IsValidIndex(Checkpoints->GetCheckpoint(Scenario));
+	const bool bFromDebugStep = DebugStartStep > 1 && Scenario->Steps.IsValidIndex(DebugStartStep - 1);
+	if (!bFromCheckpoint && !bFromDebugStep)
+	{
+		return;
+	}
+	// The opening scene shows the Redneck walking out of the forest; a later step's setup puts the heroes elsewhere.
+	for (TActorIterator<AIntroSceneDirector> It(World); It; ++It)
+	{
+		if (It->bPlayOnBeginPlay)
+		{
+			It->bPlayOnBeginPlay = false;
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: starts at a later step (%s) - the opening scene is skipped"),
+				bFromCheckpoint ? TEXT("checkpoint") : TEXT("debug start step"));
+		}
+	}
 }
 
 void APrologueDirector::BeginPlay()
@@ -676,40 +705,49 @@ void APrologueDirector::EndScene(bool bSkipped)
 	}
 	UpdateAllHeroProtection();
 
-	// ...and the view glides from the scene's last shot to the camera of whoever the player controls now: a temporary
-	// camera stands exactly where the shot was, then the engine blends from it to the hero.
+	// ...and the view glides from the scene's last shot to the camera of whoever the player controls now.
+	if (bHasScenePOV)
+	{
+		GlideViewToPlayerHero(LastScenePOV, SceneOptions.CameraBlendOut, TEXT("from the scene's last shot"));
+	}
+}
+
+void APrologueDirector::GlideViewToPlayerHero(const FMinimalViewInfo& From, float Seconds, const TCHAR* Why)
+{
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
 	APawn* PlayerPawn = IsValid(PC) ? PC->GetPawn() : nullptr;
-	if (SceneOptions.CameraBlendOut > 0.0f && bHasScenePOV && IsValid(PlayerPawn))
+	if (Seconds <= 0.0f || !IsValid(PlayerPawn))
 	{
-		if (IsValid(SceneBlendCamera))
-		{
-			SceneBlendCamera->Destroy();
-		}
-		FActorSpawnParameters Params;
-		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		Params.ObjectFlags |= RF_Transient;
-		SceneBlendCamera = GetWorld()->SpawnActor<ACameraActor>(LastScenePOV.Location, LastScenePOV.Rotation, Params);
-		if (IsValid(SceneBlendCamera))
-		{
-			if (UCameraComponent* Camera = SceneBlendCamera->GetCameraComponent())
-			{
-				Camera->SetFieldOfView(LastScenePOV.FOV);
-				Camera->SetConstraintAspectRatio(false);
-			}
-			PC->SetViewTarget(SceneBlendCamera);
-			PC->SetViewTargetWithBlend(PlayerPawn, SceneOptions.CameraBlendOut, VTBlend_EaseInOut, 2.0f, false);
-			TWeakObjectPtr<ACameraActor> WeakCamera = SceneBlendCamera;
-			GetWorldTimerManager().SetTimer(SceneBlendCleanupHandle, FTimerDelegate::CreateWeakLambda(this, [WeakCamera]()
-			{
-				if (WeakCamera.IsValid())
-				{
-					WeakCamera->Destroy();
-				}
-			}), SceneOptions.CameraBlendOut + 0.2f, false);
-			UE_LOG(LogTemp, Warning, TEXT("Prologue: camera glides from the scene's last shot to %s (%.1f s)"), *PlayerPawn->GetName(), SceneOptions.CameraBlendOut);
-		}
+		return;
 	}
+	if (IsValid(SceneBlendCamera))
+	{
+		SceneBlendCamera->Destroy();
+	}
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Params.ObjectFlags |= RF_Transient;
+	SceneBlendCamera = GetWorld()->SpawnActor<ACameraActor>(From.Location, From.Rotation, Params);
+	if (!IsValid(SceneBlendCamera))
+	{
+		return;
+	}
+	if (UCameraComponent* Camera = SceneBlendCamera->GetCameraComponent())
+	{
+		Camera->SetFieldOfView(From.FOV);
+		Camera->SetConstraintAspectRatio(false);
+	}
+	PC->SetViewTarget(SceneBlendCamera);
+	PC->SetViewTargetWithBlend(PlayerPawn, Seconds, VTBlend_EaseInOut, 2.0f, false);
+	TWeakObjectPtr<ACameraActor> WeakCamera = SceneBlendCamera;
+	GetWorldTimerManager().SetTimer(SceneBlendCleanupHandle, FTimerDelegate::CreateWeakLambda(this, [WeakCamera]()
+	{
+		if (WeakCamera.IsValid())
+		{
+			WeakCamera->Destroy();
+		}
+	}), Seconds + 0.2f, false);
+	UE_LOG(LogTemp, Warning, TEXT("Prologue: camera glides %s to %s (%.1f s)"), Why, *PlayerPawn->GetName(), Seconds);
 }
 
 void APrologueDirector::ReloadLevel()
@@ -1124,7 +1162,27 @@ bool APrologueDirector::FindAppearanceTransform(const FPrologueAppearancePlaceme
 	return true;
 }
 
-bool APrologueDirector::SwitchControlTo(FName HeroId)
+namespace
+{
+	// Step 4.8: every possession (by the player or by an AI controller) restarts the pawn — ACharacter::Restart() puts
+	// his movement back to walking. A hero riding a monster (UMountRiderComponent) is attached to it with movement off
+	// (MOVE_None); walking again, he drops off the monster's back to the ground in a frame. So right after the possession,
+	// in the same frame, his movement is switched off again. The mount itself is not touched.
+	void KeepRidingAfterPossess(ABaseCharacter* Hero)
+	{
+		if (!IsValid(Hero) || !Hero->IsMounted())
+		{
+			return;
+		}
+		if (UCharacterMovementComponent* Move = Hero->GetCharacterMovement())
+		{
+			Move->SetMovementMode(MOVE_None);
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: %s rides a monster - stays on it after the control switch"), *Hero->GetName());
+		}
+	}
+}
+
+bool APrologueDirector::SwitchControlTo(FName HeroId, float CameraBlend)
 {
 	if (!bStarted)
 	{
@@ -1152,9 +1210,31 @@ bool APrologueDirector::SwitchControlTo(FName HeroId)
 	}
 	const FName OldId = FindHeroId(OldHero);
 
+	// Step 4.6: what the player sees right now, for the glide to the new hero (taken before anything changes the view).
+	FMinimalViewInfo FromPOV;
+	const bool bGlide = CameraBlend > 0.0f && PC->PlayerCameraManager != nullptr;
+	if (bGlide)
+	{
+		FromPOV = PC->PlayerCameraManager->GetCameraCacheView();
+	}
+
+	// The Priest's inflamed vision draws on the whole screen (an unbound post-process, the frame and the hand on top of
+	// the viewport): left on, it would stay on the new hero's screen. Turned off through its own public toggle; the
+	// look fades out by itself while the camera glides away.
+	if (IsValid(OldHero))
+	{
+		UVisionFireSourceComponent* Vision = OldHero->FindComponentByClass<UVisionFireSourceComponent>();
+		if (IsValid(Vision) && Vision->bIsVisionActive)
+		{
+			Vision->ToggleVision();
+			UE_LOG(LogTemp, Warning, TEXT("Prologue: %s leaves the player's control - his inflamed vision is turned off"), *OldId.ToString());
+		}
+	}
+
 	// Possess() lets go of the old hero (its UnPossessed() takes its HUD off the screen) and takes the new hero
 	// away from its AI controller; the new hero builds its own HUD in PossessedBy().
 	PC->Possess(NewHero);
+	KeepRidingAfterPossess(NewHero);
 	// Look the way the new hero faces, so his own camera starts straight behind him.
 	PC->SetControlRotation(FRotator(0.0f, NewHero->GetActorRotation().Yaw, 0.0f));
 	ReleaseFromAI(NewHero);
@@ -1183,6 +1263,12 @@ bool APrologueDirector::SwitchControlTo(FName HeroId)
 
 	UE_LOG(LogTemp, Warning, TEXT("Prologue: control %s -> %s"), *OldId.ToString(), *HeroId.ToString());
 	ShowDebug(601, 3.0f, FColor::Yellow, FString::Printf(TEXT("Prologue: control %s -> %s"), *OldId.ToString(), *HeroId.ToString()));
+
+	if (bGlide)
+	{
+		GlideViewToPlayerHero(FromPOV, CameraBlend, *FString::Printf(TEXT("from %s's view"), *OldId.ToString()));
+	}
+
 	OnHeroSwitched.Broadcast(HeroId);
 	return true;
 }
@@ -1273,6 +1359,7 @@ void APrologueDirector::PutUnderAI(ABaseCharacter* Hero, FName HeroId)
 	if (Hero->GetController() != AICon)
 	{
 		AICon->Possess(Hero);
+		KeepRidingAfterPossess(Hero);
 	}
 	// RMB-aiming is read straight from the key state by ABaseCharacter::Tick() only for the player's hero, but
 	// bIsAiming would keep its last value; suppressing it makes sure an AI hero never stays "aiming".
@@ -1372,47 +1459,10 @@ int32 APrologueDirector::SelectMonsterGroup(FName GroupName, const FPrologueMons
 	}
 
 	const ABaseCharacter* Hero = ResolveHero(Selection.NearHeroId);
-	if (!IsValid(Hero))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Prologue: group '%s' - hero '%s' is not in the level, counting from the director instead"),
-			*GroupName.ToString(), *Selection.NearHeroId.ToString());
-	}
-	const FVector Center = IsValid(Hero) ? Hero->GetActorLocation() : GetActorLocation();
-
-	TArray<TPair<float, ABaseMonster*>> Candidates;
-	for (TActorIterator<ABaseMonster> It(World); It; ++It)
-	{
-		ABaseMonster* Monster = *It;
-		if (!IsValid(Monster) || Monster->Health <= 0.0f || Monster->bIsBeingRidden)
-		{
-			continue;
-		}
-		if (!Selection.MonsterTag.IsNone() && !Monster->ActorHasTag(Selection.MonsterTag))
-		{
-			continue;
-		}
-		const FName Other = FindMonsterGroupOf(Monster);
-		if (Selection.bSkipOtherGroups && !Other.IsNone() && Other != GroupName)
-		{
-			continue;
-		}
-		const float DistSquared = FVector::DistSquared2D(Monster->GetActorLocation(), Center);
-		if (Selection.Radius > 0.0f && DistSquared > FMath::Square(Selection.Radius))
-		{
-			continue;
-		}
-		Candidates.Emplace(DistSquared, Monster);
-	}
-	Candidates.Sort([](const TPair<float, ABaseMonster*>& A, const TPair<float, ABaseMonster*>& B) { return A.Key < B.Key; });
-	if (Selection.MaxCount > 0 && Candidates.Num() > Selection.MaxCount)
-	{
-		Candidates.SetNum(Selection.MaxCount);
-	}
-
 	TArray<TWeakObjectPtr<ABaseMonster>> Picked;
-	for (const TPair<float, ABaseMonster*>& Candidate : Candidates)
+	for (ABaseMonster* Monster : FindMonsters(Selection, GroupName))
 	{
-		Picked.Add(Candidate.Value);
+		Picked.Add(Monster);
 	}
 
 	// A monster picked away from another group leaves it.
@@ -1464,6 +1514,59 @@ int32 APrologueDirector::SelectMonsterGroup(FName GroupName, const FPrologueMons
 		Selection.MaxCount > 0 ? *FString::Printf(TEXT(" (max %d)"), Selection.MaxCount) : TEXT(""),
 		Selection.Radius / 100.0f, IsValid(Hero) ? *Hero->GetName() : TEXT("the director"));
 	return Picked.Num();
+}
+
+TArray<ABaseMonster*> APrologueDirector::FindMonsters(const FPrologueMonsterSelection& Selection, FName ForGroup) const
+{
+	TArray<ABaseMonster*> Result;
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return Result;
+	}
+
+	const ABaseCharacter* Hero = ResolveHero(Selection.NearHeroId);
+	if (!IsValid(Hero))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Prologue: picking monsters - hero '%s' is not in the level, counting from the director instead"),
+			*Selection.NearHeroId.ToString());
+	}
+	const FVector Center = IsValid(Hero) ? Hero->GetActorLocation() : GetActorLocation();
+
+	TArray<TPair<float, ABaseMonster*>> Candidates;
+	for (TActorIterator<ABaseMonster> It(World); It; ++It)
+	{
+		ABaseMonster* Monster = *It;
+		if (!IsValid(Monster) || Monster->Health <= 0.0f || Monster->bIsBeingRidden)
+		{
+			continue;
+		}
+		if (!Selection.MonsterTag.IsNone() && !Monster->ActorHasTag(Selection.MonsterTag))
+		{
+			continue;
+		}
+		const FName Other = FindMonsterGroupOf(Monster);
+		if (Selection.bSkipOtherGroups && !Other.IsNone() && Other != ForGroup)
+		{
+			continue;
+		}
+		const float DistSquared = FVector::DistSquared2D(Monster->GetActorLocation(), Center);
+		if (Selection.Radius > 0.0f && DistSquared > FMath::Square(Selection.Radius))
+		{
+			continue;
+		}
+		Candidates.Emplace(DistSquared, Monster);
+	}
+	Candidates.Sort([](const TPair<float, ABaseMonster*>& A, const TPair<float, ABaseMonster*>& B) { return A.Key < B.Key; });
+	if (Selection.MaxCount > 0 && Candidates.Num() > Selection.MaxCount)
+	{
+		Candidates.SetNum(Selection.MaxCount);
+	}
+	for (const TPair<float, ABaseMonster*>& Candidate : Candidates)
+	{
+		Result.Add(Candidate.Value);
+	}
+	return Result;
 }
 
 void APrologueDirector::SetMonsterGroupRole(FName GroupName, UPrologueMonsterRole* NewRole, float Duration, bool bReleaseOnControlSwitch)
